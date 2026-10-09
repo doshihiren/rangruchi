@@ -181,13 +181,17 @@ def run_targeted_sync(kind):
                         AND COALESCE(TRIM(t.agency_name),'')=''
                         AND COALESCE(TRIM(p.agency_name),'')<>''""")
                     totals["ticket_updates"] += cur.rowcount
-                phone_col = "agency_mobile" if "agency_mobile" in agency_cols else "mobile" if "mobile" in agency_cols else None
-                if phone_col and "agency_name" in agency_cols:
+                # Match complete agency names only; similar prefixes may belong to
+                # different people with different phone numbers.
+                phone_cols = [col for col in ("mobile", "agency_mobile") if col in agency_cols]
+                if phone_cols and "agency_name" in agency_cols:
                     for name, phone in groups.values():
-                        cur.execute(f"""UPDATE tally_agency_master SET {phone_col}=%s
-                            WHERE UPPER(TRIM(agency_name))=%s
-                            AND COALESCE(TRIM({phone_col}),'')=''""", (phone,name.upper()))
-                        totals["agency_updates"] += cur.rowcount
+                        for column in phone_cols:
+                            cur.execute(f"""UPDATE tally_agency_master SET {column}=%s
+                                WHERE UPPER(TRIM(agency_name))=%s
+                                AND COALESCE(TRIM({column}),'')=''""",
+                                (phone, name.strip().upper()))
+                            totals["agency_updates"] += cur.rowcount
             else:
                 if {"party_name","mobile"} <= tpm:
                     for name, agency, phone, agent in parties.values():
