@@ -99,6 +99,33 @@ def _columns(cur, table):
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=%s", (table,))
     return {r[0] for r in cur.fetchall()}
 
+def _normalize_party(name):
+    """Normalize exact party identity without fuzzy matching."""
+    value = html.unescape(str(name or "")).strip()
+    value = re.sub(r"\\s*\\(RR\\d+\\)\\s*$", "", value, flags=re.I)
+    value = re.sub(r"\\s+", " ", value).strip().upper()
+    return value
+
+def _match_missing_ticket_parties(cur, parties):
+    """Find unique, exact party-name matches before touching any ticket."""
+    cur.execute("SELECT DISTINCT party_name FROM tickets WHERE COALESCE(TRIM(agency_name),'')=''")
+    names = [str(r[0]) for r in cur.fetchall()]
+    mapped = {}
+    ambiguous = set()
+    for value in parties.values():
+        key = _normalize_party(value[0])
+        if key in mapped and mapped[key][0] != value[0]:
+            ambiguous.add(key)
+        else:
+            mapped[key] = value
+    updates = []
+    for ticket_name in names:
+        key = _normalize_party(ticket_name)
+        match = mapped.get(key)
+        if match and key not in ambiguous and match[1]:
+            updates.append((ticket_name, match[1]))
+    return updates
+
 def run_targeted_sync(kind):
     if kind not in ("agency", "contact"):
         raise ValueError("Unknown sync type")
@@ -133,6 +160,14 @@ def run_targeted_sync(kind):
                                 WHERE UPPER(TRIM(party_name))=%s
                                 AND COALESCE(TRIM(agency_name),'')=''""", (agency,name.upper()))
                             totals["party_updates"] += cur.rowcount
+                # Fill tickets directly from their live Tally ledger UDF.
+                # This avoids relying on a potentially stale party-master row.
+                if {"party_name", "agency_name"} <= tickets:
+                    for ticket_name, agency in _match_missing_ticket_parties(cur, parties):
+                        cur.execute("""UPDATE tickets SET agency_name=%s
+                            WHERE party_name=%s AND COALESCE(TRIM(agency_name),'')=''""",
+                            (agency, ticket_name))
+                        totals["ticket_updates"] += cur.rowcount
                 if {"party_name", "agent_name"} <= tickets:
                     for name, agency, phone, agent in parties.values():
                         if agent:
