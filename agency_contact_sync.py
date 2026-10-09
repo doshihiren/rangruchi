@@ -1,4 +1,4 @@
-"""Targeted, non-destructive agency/contact refresh from the local Tally Master.xml.
+"""Targeted, non-destructive agency/contact refresh from live TallyPrime.
 No full financial sync. Existing nonblank values are preserved.
 """
 import html
@@ -46,27 +46,38 @@ def _contact(block):
     options.append(_udf(block, ("MIWHATSAPPNUM",)))
     return next((p for raw in options if (p := _phone(raw))), "")
 
-def _blocks(path):
-    with open(path, "rb") as fp:
-        head = fp.read(4)
-    enc = "utf-16-le" if head[:2] == b"\xff\xfe" or (len(head)>1 and head[1]==0) else "utf-16-be" if head[:2] == b"\xfe\xff" else "utf-8"
-    buf = ""
-    with io.open(path, encoding=enc, errors="ignore") as fp:
-        while True:
-            chunk = fp.read(2_000_000)
-            if not chunk:
-                break
-            buf += chunk
-            end = 0
-            for match in BLOCK.finditer(buf):
-                yield match.group(1).upper(), html.unescape(match.group(2)), match.group(3)
-                end = match.end()
-            if end:
-                buf = buf[end:]
-            if len(buf)>20_000_000:
-                raise ValueError("Unexpectedly long XML block; sync aborted without changes")
-        for match in BLOCK.finditer(buf):
-            yield match.group(1).upper(), html.unescape(match.group(2)), match.group(3)
+def _live_collection(kind):
+    """Fetch current Tally masters over HTTP; no local Master.xml required."""
+    import requests
+    import xml.etree.ElementTree as ET
+    from config import TALLY_URL
+    fields = (
+        "Name,Parent,LedgerMobile,Mobile,PhoneNumber,LedgerContactList,"
+        "BMstLedAgencyNameUdf,BEIBrokerNameUdf,MIWhatsAppNum"
+        if kind == "Ledger" else
+        "Name,Parent,BGRPBrokerGroupMoUdf,Mobile,PhoneNumber"
+    )
+    company = "RANGRUCHI FASHION PVT LTD - (from 1-Apr-25)"
+    xml = f"""<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>
+<TYPE>Collection</TYPE><ID>RRTarget{kind}</ID></HEADER><BODY><DESC>
+<STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+<SVCURRENTCOMPANY>{company}</SVCURRENTCOMPANY></STATICVARIABLES>
+<TDL><TDLMESSAGE><COLLECTION NAME="RRTarget{kind}"><TYPE>{kind}</TYPE>
+<FETCH>{fields}</FETCH></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>"""
+    resp = requests.post(TALLY_URL, data=xml.encode("utf-8"),
+        headers={"Content-Type":"application/xml","Accept-Encoding":"identity"}, timeout=120)
+    resp.raise_for_status()
+    raw = re.sub(r'&#(?:x[0-9a-fA-F]+|[0-9]+);', '', resp.text)
+    root = ET.fromstring(raw)
+    if root.findtext(".//STATUS") == "0":
+        raise RuntimeError("Tally reported a failed export")
+    nodes = root.findall(".//" + kind.upper())
+    if not nodes:
+        raise RuntimeError("Tally returned no " + kind + " records; no database changes made")
+    for node in nodes:
+        name = html.unescape(node.attrib.get("NAME","").strip())
+        if name:
+            yield name, ET.tostring(node,encoding="unicode")
 
 def _columns(cur, table):
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=%s", (table,))
@@ -75,15 +86,12 @@ def _columns(cur, table):
 def run_targeted_sync(kind):
     if kind not in ("agency", "contact"):
         raise ValueError("Unknown sync type")
-    if not os.path.isfile(MASTER):
-        raise FileNotFoundError("Master.xml not found on the application computer. Export the latest Tally masters first.")
     parties, groups = {}, {}
-    for typ, name, block in _blocks(MASTER):
-        if typ == "GROUP":
-            group_phone = _phone(_udf(block, UDF_MOBILE)) or _contact(block)
-            if group_phone:
-                groups[name.upper()] = (name, group_phone)
-            continue
+    for name, block in _live_collection("Group"):
+        group_phone = _phone(_udf(block, UDF_MOBILE)) or _contact(block)
+        if group_phone:
+            groups[name.upper()] = (name, group_phone)
+    for name, block in _live_collection("Ledger"):
         agency = _udf(block, UDF_AGENCY)
         if not agency:
             parent = _tag(block, "PARENT")
@@ -92,6 +100,8 @@ def run_targeted_sync(kind):
         phone = _contact(block)
         if agency or phone:
             parties[name.upper()] = (name, agency, phone, _udf(block, ("BEIBROKERNAMEUDF",)))
+    if not parties:
+        raise RuntimeError("No ledger contact or agency fields returned; database unchanged")
     conn = get_conn()
     totals = {"parties":len(parties), "groups":len(groups), "party_updates":0, "ticket_updates":0, "agency_updates":0}
     try:
