@@ -208,12 +208,13 @@ def run_targeted_sync(kind):
                         if len(matched) > 1:
                             continue
                         if matched:
-                            if not matched[0][1] or not str(matched[0][1]).strip():
-                                cur.execute("""UPDATE tally_agency_master SET mobile=%s,
-                                    last_synced_at=NOW() WHERE id=%s
-                                    AND COALESCE(TRIM(mobile),'')=''""",
-                                    (phone, matched[0][0]))
-                                totals["agency_updates"] += cur.rowcount
+                            # Live Tally Group is authoritative for agency phones,
+                            # including changes to previously populated numbers.
+                            cur.execute("""UPDATE tally_agency_master SET mobile=%s,
+                                last_synced_at=NOW() WHERE id=%s
+                                AND mobile IS DISTINCT FROM %s""",
+                                (phone, matched[0][0], phone))
+                            totals["agency_updates"] += cur.rowcount
                         else:
                             cur.execute("""INSERT INTO tally_agency_master
                                 (agency_name,mobile,last_synced_at)
