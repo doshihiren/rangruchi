@@ -506,6 +506,16 @@ def tickets2_assign():
             WHERE id=%s
         """, (ticket["id"],))
 
+    # Transfer active follow-up responsibility with the ticket. Keep the
+    # original created_by and history untouched for auditing.
+    execute("""
+        UPDATE followups
+        SET assigned_to=%s, updated_at=NOW()
+        WHERE party_name=%s
+          AND (archived IS NULL OR archived=FALSE)
+          AND assigned_to IS DISTINCT FROM %s
+    """, (assignee or None, ticket["party_name"], assignee or None))
+
     # Verify the actual database value after the UPDATE.
     updated = fetchone("""
         SELECT id, party_name, assigned_to, assigned_on
