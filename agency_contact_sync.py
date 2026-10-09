@@ -100,10 +100,10 @@ def _columns(cur, table):
     return {r[0] for r in cur.fetchall()}
 
 def _normalize_party(name):
-    """Normalize exact party identity without fuzzy matching."""
+    """Normalize party names for exact matching, never fuzzy matching."""
     value = html.unescape(str(name or "")).strip()
-    value = re.sub(r"\\s*\\(RR\\d+\\)\\s*$", "", value, flags=re.I)
-    value = re.sub(r"\\s+", " ", value).strip().upper()
+    value = re.sub(r"\s*\(RR\d+\)\s*$", "", value, flags=re.I)
+    value = re.sub(r"\s+", " ", value).strip().upper()
     return value
 
 def _match_missing_ticket_parties(cur, parties):
