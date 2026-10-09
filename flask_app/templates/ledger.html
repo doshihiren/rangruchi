@@ -1,0 +1,451 @@
+{% extends "base.html" %}
+{% block title %}Party Ledger
+<!-- Follow-up Modal - party pre-filled -->
+<div id="fu-modal" class="hidden fixed inset-0 z-50 flex items-end md:items-center justify-center p-4 bg-black/40">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-screen overflow-y-auto">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
+      <h3 class="font-bold text-slate-800 text-base" style="font-family:'Space Grotesk',sans-serif;">Add Follow-up</h3>
+      <button onclick="document.getElementById('fu-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-lg">✕</button>
+    </div>
+    <form method="POST" action="/followups/add" class="p-5 space-y-4">
+      <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+        <div class="text-xs font-bold text-blue-400 uppercase tracking-widest mb-0.5">Party</div>
+        <div class="font-bold text-blue-800">{{ selected }}</div>
+        <input type="hidden" name="party_name" value="{{ selected }}">
+        <input type="hidden" name="ticket_id" value="">
+        <input type="hidden" name="bill_no" value="">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Status</label>
+          <select name="status" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+            <option>Pending</option><option>Followup Done</option>
+            <option>Promise To Pay</option><option>Paid</option>
+            <option>Dispute</option><option>Escalated</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Priority</label>
+          <select name="priority" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+            <option>High</option><option selected>Medium</option><option>Low</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Last Call Date (auto)</label>
+          <div class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600 font-semibold" id="today-date"></div>
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Next Follow-up</label>
+          <input type="date" name="next_followup_date" id="next-fu-date" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+        </div>
+        <div class="col-span-2">
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Due Amount</label>
+          <div class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 font-bold text-red-700">₹{{ "{:,.0f}".format(due_amount) }}</div>
+        </div>
+        <div class="col-span-2">
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Notes</label>
+          <textarea name="notes" rows="3" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none" placeholder="Call notes, party response, next action..."></textarea>
+        </div>
+      </div>
+      <div class="flex gap-3 pt-1">
+        <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl text-sm transition">💾 Save Follow-up</button>
+        <button type="button" onclick="document.getElementById('fu-modal').classList.add('hidden')" class="px-5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50 transition">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// Set today's date in the modal
+const today = new Date().toISOString().split('T')[0];
+const todayDisplay = new Date().toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'});
+const todayEl = document.getElementById('today-date');
+if(todayEl) todayEl.textContent = todayDisplay;
+const nextFu = document.getElementById('next-fu-date');
+if(nextFu) nextFu.value = today;
+</script>
+
+
+
+
+
+
+{% endblock %}
+{% block content %}
+<div class="p-4 md:p-6 max-w-screen-xl mx-auto">
+  <div class="mb-4">
+    <h1 class="text-xl md:text-2xl font-extrabold text-slate-900" style="font-family:'Space Grotesk',sans-serif;">Party Ledger</h1>
+    <p class="text-slate-500 text-sm mt-1">{{ total_parties }} parties accessible · Bill-wise aging and follow-ups</p>
+  </div>
+
+  <!-- Smart Search -->
+  <form method="GET" class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+    <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Search Party</label>
+    <div class="relative">
+      <input id="search-input" name="q" value="{{ search or '' }}"
+        placeholder="🔍 Party / Agency / Mobile / State..."
+        autocomplete="off"
+        class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+      <div id="search-dropdown" class="hidden absolute z-30 w-full bg-white border border-slate-200 rounded-xl shadow-xl mt-1 max-h-64 overflow-y-auto"></div>
+    </div>
+    <input type="hidden" name="party" id="party-hidden" value="{{ selected or '' }}">
+  </form>
+
+  {% if selected %}
+  <!-- Party Header - Clean Design -->
+  <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+
+    <!-- Name + PDF -->
+    <div class="flex items-start justify-between flex-wrap gap-3 mb-4">
+      <div>
+        <h2 class="text-lg font-extrabold text-slate-900" style="font-family:'Space Grotesk',sans-serif;">
+          {{ selected }}
+          {% if mobile and mobile|string|length >= 10 %}
+          <a href="tel:{{ mobile[-10:] }}" class="text-sm font-semibold text-blue-500 ml-2">📱 {{ mobile[-10:] }}</a>
+          {% endif %}
+        </h2>
+        <div class="text-slate-400 text-xs mt-0.5">Party ledger &middot; {{ bills|length }} bill(s) on record</div>
+      </div>
+      <a href="/ledger/pdf?party={{ selected|urlencode }}"
+         class="flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold px-3 py-2 rounded-lg text-xs transition">
+        <i class="ti ti-file-type-pdf text-base"></i> Download PDF
+      </a>
+    </div>
+
+    <!-- Info Grid: Agency | State | Assigned | Net Due | Oldest -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
+
+      <div class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+        <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1" style="font-size:9px;">Agency</div>
+        <div class="text-xs font-bold text-purple-700 truncate">{{ agency or '—' }}</div>
+        {% if agency_mobile %}<a href="tel:{{ agency_mobile }}" class="text-xs text-blue-600 font-semibold">📱 {{ agency_mobile }}</a>{% endif %}
+      </div>
+
+      <div class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+        <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1" style="font-size:9px;">State</div>
+        <div class="text-xs font-bold text-slate-700">{{ state or '—' }}</div>
+        {% if seller and seller != '—' %}<div class="text-xs text-slate-400 mt-0.5">{{ seller }}</div>{% endif %}
+      </div>
+
+      <div class="bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">
+        <div class="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-1" style="font-size:9px;">Assigned To</div>
+        {% if assigned_to %}
+        <div class="text-xs font-bold text-indigo-700">👤 {{ assigned_to }}</div>
+        {% if assigned_on %}<div class="text-xs text-slate-400 mt-0.5">since {{ assigned_on }}</div>{% endif %}
+        {% else %}<div class="text-xs text-amber-600 font-bold">⚠ Unassigned</div>{% endif %}
+      </div>
+
+      <div class="bg-red-50 border border-red-200 rounded-lg px-3 py-2" style="border-left:3px solid #dc2626;">
+        <div class="text-xs font-bold text-red-400 uppercase tracking-widest mb-1" style="font-size:9px;">Net Due</div>
+        <div class="text-base font-extrabold text-red-700">₹{{ "{:,.0f}".format(due_amount) }}</div>
+        <div class="text-xs text-slate-400 mt-0.5">after deductions</div>
+      </div>
+
+      <div class="{{ 'bg-red-50 border-red-200' if oldest>90 else 'bg-amber-50 border-amber-200' if oldest>30 else 'bg-green-50 border-green-200' }} border rounded-lg px-3 py-2">
+        <div class="font-bold uppercase tracking-widest mb-1 {{ 'text-red-400' if oldest>90 else 'text-amber-500' if oldest>30 else 'text-green-500' }}" style="font-size:9px;">Oldest Bill</div>
+        <div class="text-base font-extrabold {{ 'text-red-700' if oldest>90 else 'text-amber-700' if oldest>30 else 'text-green-700' }}">{{ oldest }}d</div>
+        <div class="text-xs text-slate-400 mt-0.5">{{ bills|length }} due bills</div>
+      </div>
+
+      <div class="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+        <div class="text-xs font-bold text-blue-400 uppercase tracking-widest mb-1" style="font-size:9px;">Credit Period</div>
+        <div class="text-base font-extrabold text-blue-700">{{ credit_period }}d</div>
+        <div class="text-xs text-slate-400 mt-0.5">payment terms</div>
+      </div>
+
+    </div>
+
+    <!-- PDC + Unallocated row (only if values exist) -->
+    {% if (pdc_total is defined and pdc_total > 0) or (unallocated is defined and unallocated > 0) %}
+    <div class="flex flex-wrap gap-3 pt-3 border-t border-slate-100">
+      {% if pdc_total is defined and pdc_total > 0 %}
+      <div class="bg-teal-50 border border-teal-200 rounded-lg px-4 py-2 flex items-center gap-3">
+        <div>
+          <div class="text-xs font-bold text-teal-500 uppercase tracking-widest" style="font-size:9px;">PDC Cheques</div>
+          <div class="text-sm font-extrabold text-teal-700">₹{{ "{:,.0f}".format(pdc_total) }}</div>
+        </div>
+        <div class="text-xs text-teal-600 font-semibold bg-teal-100 px-2 py-0.5 rounded-full">{{ pdc_entries|length }} cheques</div>
+      </div>
+      {% endif %}
+      {% if unallocated is defined and unallocated > 0 %}
+      <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 flex items-center gap-3">
+        <div>
+          <div class="text-xs font-bold text-amber-600 uppercase tracking-widest" style="font-size:9px;">Unallocated</div>
+          <div class="text-sm font-extrabold text-amber-700">₹{{ "{:,.0f}".format(unallocated) }}</div>
+        </div>
+        <div class="text-xs text-amber-600 font-semibold">deducted from net due</div>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+  </div>
+
+  <!-- Side-by-side: Bills (60%) + Follow-ups (40%) -->
+  <div class="flex flex-col lg:flex-row gap-4">
+
+    <!-- ── Bills Section (60%) ───────────────────────────────── -->
+    <div class="lg:w-3/5 min-w-0">
+      <h3 class="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+        📋 Bills <span class="text-slate-400 font-normal">({{ bills|length }})</span>
+      </h3>
+
+      <!-- Desktop bill table -->
+      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden hidden md:block mb-4">
+        <div class="grid bg-slate-50 border-b-2 border-slate-200 px-3 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest" style="grid-template-columns:90px 100px 130px 1fr 150px 90px; gap: 0 10px;">
+          <div>Date</div><div>Due Date</div><div>Invoice No</div><div></div><div class="text-right">Amount</div><div class="text-right">Status</div>
+        </div>
+        <div class="max-h-[840px] overflow-y-auto">
+
+        {% if unallocated and unallocated > 0 %}
+        <div class="grid items-center px-3 py-2.5 border-b border-slate-50 bg-amber-50" style="grid-template-columns:90px 100px 130px 1fr 150px 90px; gap: 0 10px;">
+          <div class="text-xs text-amber-800 font-bold" style="grid-column: span 4;">⚠️ Unallocated Receipt</div>
+          <div class="text-sm font-bold text-right whitespace-nowrap">
+            <span class="text-green-700">₹{{ "{:,.0f}".format(unallocated) }}</span>
+            <span class="badge bg-green-100 text-green-700 ml-1">CR</span>
+          </div>
+          <div class="text-right"><span class="badge bg-amber-100 text-amber-700">Unsettled</span></div>
+        </div>
+        {% endif %}
+
+        {% for b in bills %}
+        {% set paid = b.pending_amount == 0 %}
+        {% set days = b.aging_days or 0 %}
+        <div class="grid items-center px-3 py-2.5 border-b border-slate-50 last:border-0 {{ 'bg-green-50/40' if paid else '' }}" style="grid-template-columns:90px 100px 130px 1fr 150px 90px; gap: 0 10px;">
+          <div class="text-sm text-slate-700 font-medium">{{ b.invoice_date or '—' }}</div>
+          <div class="text-xs">
+            {% if paid %}<span class="text-slate-400">—</span>
+            {% else %}
+            {{ b.due_date_str or '—' }}
+            <span class="block font-bold {{ 'text-red-600' if b.due_in_days < 0 else 'text-green-600' if b.due_in_days > 7 else 'text-amber-600' }}">
+              ({{ b.due_in_days }}d)
+            </span>
+            {% endif %}
+          </div>
+          <div class="text-sm text-slate-500 font-mono truncate">{{ b.invoice_no or '—' }}</div>
+          <div></div>
+          <div class="text-sm font-bold text-right whitespace-nowrap">
+            {% if paid %}
+            <span class="text-green-700">₹{{ "{:,.0f}".format(b.total_amount|abs) }}</span>
+            <span class="badge bg-green-100 text-green-700 ml-1">CR</span>
+            {% else %}
+            <span class="text-red-700">₹{{ "{:,.0f}".format(b.pending_amount) }}</span>
+            <span class="badge bg-red-100 text-red-700 ml-1">DR</span>
+            {% endif %}
+          </div>
+          <div class="text-right"><span class="badge {{ 'bg-green-100 text-green-700' if paid else 'bg-red-100 text-red-700' if days>90 else 'bg-amber-100 text-amber-700' if days>30 else 'bg-blue-100 text-blue-700' }}">{{ b.aging or 'Unknown' }}</span></div>
+        </div>
+        {% else %}
+        <div class="px-4 py-10 text-center text-slate-400 text-sm">No bills found.</div>
+        {% endfor %}
+        </div>
+      </div>
+
+      <!-- Mobile bill cards -->
+      <div class="md:hidden space-y-3 mb-4">
+        {% if unallocated and unallocated > 0 %}
+        <div class="bg-amber-50 rounded-xl border border-amber-200 p-4">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-bold text-amber-800">⚠️ Unallocated Receipt</span>
+            <span class="badge bg-amber-100 text-amber-700">Unsettled</span>
+          </div>
+          <div class="text-xs text-amber-700 mb-1">Payment received, not adjusted to any bill</div>
+          <div class="font-extrabold text-green-700" style="font-family:'Space Grotesk',sans-serif;">
+            ₹{{ "{:,.0f}".format(unallocated) }} <span class="badge bg-green-100 text-green-700 ml-1">CR</span>
+          </div>
+        </div>
+        {% endif %}
+        {% for b in bills %}
+        {% set paid = b.pending_amount == 0 %}
+        {% set days = b.aging_days or 0 %}
+        <div class="bg-white rounded-xl border border-slate-200 p-4 {{ 'border-green-200 bg-green-50/30' if paid else 'border-red-100' if days>30 else '' }}">
+          <div class="flex items-center justify-between mb-2">
+            <div class="font-mono text-sm font-bold text-slate-700">{{ b.invoice_no or '—' }}</div>
+            <span class="badge {{ 'bg-green-100 text-green-700' if paid else 'bg-red-100 text-red-700' if days>90 else 'bg-amber-100 text-amber-700' if days>30 else 'bg-blue-100 text-blue-700' }}">{{ 'Settled' if paid else b.aging }}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <div class="text-xs text-slate-400">
+              {{ b.invoice_date or '—' }}
+              {% if not paid %}
+              · Due {{ b.due_date_str or '—' }}
+              <span class="font-bold {{ 'text-red-600' if b.due_in_days < 0 else 'text-green-600' if b.due_in_days > 7 else 'text-amber-600' }}">({{ b.due_in_days }}d)</span>
+              {% endif %}
+            </div>
+            <div class="font-extrabold {{ 'text-green-700' if paid else 'text-red-700' }}" style="font-family:'Space Grotesk',sans-serif;">
+              {% if paid %}₹{{ "{:,.0f}".format(b.total_amount|abs) }} <span class="badge bg-green-100 text-green-700">CR</span>
+              {% else %}₹{{ "{:,.0f}".format(b.pending_amount) }} <span class="badge bg-red-100 text-red-700">DR</span>{% endif %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- ── Follow-up History Section (40%) ───────────────────── -->
+    <div class="lg:w-2/5 min-w-0">
+      <h3 class="text-sm font-bold text-slate-700 mb-2 flex items-center justify-between gap-2">
+        <span>📞 Follow-up History <span class="text-slate-400 font-normal">({{ followups|length }})</span></span>
+        <button onclick="document.getElementById('fu-modal').classList.remove('hidden')"
+          class="text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold px-2.5 py-1 rounded-lg transition">+ Add</button>
+      </h3>
+
+      {% if not followups %}
+      <div class="bg-slate-50 border border-slate-200 rounded-xl p-6 text-center text-slate-400 text-sm">
+        No follow-up history.<br>
+        <a href="#" onclick="document.getElementById('fu-modal').classList.remove('hidden'); return false;" class="text-blue-600 font-semibold">Add one →</a>
+      </div>
+      {% else %}
+      <div class="space-y-2 max-h-[840px] overflow-y-auto pr-1">
+        {% for f in followups %}
+        <div class="bg-white rounded-xl border border-slate-200 p-3">
+          <div class="flex items-start justify-between gap-2 mb-1">
+            <div class="text-xs font-bold text-slate-700">{{ f.last_call_date or f.next_followup_date or '—' }}</div>
+            <div class="flex gap-1 flex-shrink-0">
+              <span class="badge {{ 'bg-red-100 text-red-700' if f.priority=='High' else 'bg-amber-100 text-amber-700' if f.priority=='Medium' else 'bg-green-100 text-green-700' }}" style="font-size:10px;">{{ f.priority }}</span>
+              <span class="badge {{ 'bg-green-100 text-green-700' if f.status=='Paid' else 'bg-red-100 text-red-700' if f.status in ['Pending','Escalated'] else 'bg-blue-100 text-blue-700' }}" style="font-size:10px;">{{ f.status }}</span>
+            </div>
+          </div>
+          {% if f.notes %}<div class="text-xs text-slate-600">{{ f.notes[:120] }}</div>{% endif %}
+          <div class="flex items-center justify-between mt-1.5">
+            {% if f.promise_amount %}<div class="text-xs font-semibold text-blue-600">Promise: ₹{{ "{:,.0f}".format(f.promise_amount) }}</div>{% else %}<div></div>{% endif %}
+            <div class="text-xs text-slate-400">{{ f.assigned_to or '—' }}</div>
+          </div>
+          {% if f.next_followup_date %}<div class="text-xs text-slate-400 mt-1">Next: {{ f.next_followup_date }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+
+  <!-- PDC Section -->
+  {% if pdc_entries %}
+  <div class="mt-4">
+    <h3 class="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+      🏦 Post-Dated Cheques <span class="text-slate-400 font-normal">({{ pdc_entries|length }})</span>
+      <span class="text-xs font-normal text-teal-600">· ₹{{ "{:,.0f}".format(pdc_entries|sum(attribute='amount')) }}</span>
+    </h3>
+    <div class="bg-white rounded-xl border border-teal-200 overflow-hidden">
+      <div class="grid bg-teal-50 border-b-2 border-teal-200 px-3 py-2 text-xs font-bold text-teal-700 uppercase tracking-widest" style="grid-template-columns:120px 130px 1fr 130px;">
+        <div>Cheque Date</div><div>Voucher No</div><div>Narration</div><div class="text-right">Amount</div>
+      </div>
+      {% for p in pdc_entries %}
+      <div class="grid items-center px-3 py-2.5 border-b border-slate-50 last:border-0 hover:bg-teal-50/40" style="grid-template-columns:120px 130px 1fr 130px;">
+        <div class="text-sm font-semibold text-teal-700">{{ p.cheque_date }}</div>
+        <div class="text-xs font-mono text-slate-600">{{ p.voucher_number or '—' }}</div>
+        <div class="text-xs text-slate-500">{{ p.narration or '—' }}</div>
+        <div class="text-sm font-bold text-right text-teal-700">₹{{ "{:,.0f}".format(p.amount) }}</div>
+      </div>
+      {% endfor %}
+      <div class="px-3 py-2 bg-teal-50 border-t border-teal-200 flex justify-between">
+        <span class="text-xs font-bold text-teal-600">Total PDC</span>
+        <span class="text-sm font-extrabold text-teal-700">₹{{ "{:,.0f}".format(pdc_entries|sum(attribute='amount')) }}</span>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% endif %}
+
+<!-- Follow-up Modal - party pre-filled -->
+<div id="fu-modal" class="hidden fixed inset-0 z-50 flex items-end md:items-center justify-center p-4 bg-black/40">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-screen overflow-y-auto">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
+      <h3 class="font-bold text-slate-800 text-base" style="font-family:'Space Grotesk',sans-serif;">Add Follow-up</h3>
+      <button onclick="document.getElementById('fu-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-lg">✕</button>
+    </div>
+    <form method="POST" action="/followups/add" class="p-5 space-y-4">
+      <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+        <div class="text-xs font-bold text-blue-400 uppercase tracking-widest mb-0.5">Party</div>
+        <div class="font-bold text-blue-800">{{ selected }}</div>
+        <input type="hidden" name="party_name" value="{{ selected }}">
+        <input type="hidden" name="ticket_id" value="">
+        <input type="hidden" name="bill_no" value="">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Status</label>
+          <select name="status" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+            <option>Pending</option><option>Followup Done</option>
+            <option>Promise To Pay</option><option>Paid</option>
+            <option>Dispute</option><option>Escalated</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Priority</label>
+          <select name="priority" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+            <option>High</option><option selected>Medium</option><option>Low</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Last Call Date (auto)</label>
+          <div class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600 font-semibold" id="today-date"></div>
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Next Follow-up</label>
+          <input type="date" name="next_followup_date" id="next-fu-date" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+        </div>
+        <div class="col-span-2">
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Due Amount</label>
+          <div class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 font-bold text-red-700">₹{{ "{:,.0f}".format(due_amount) }}</div>
+        </div>
+        <div class="col-span-2">
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Notes</label>
+          <textarea name="notes" rows="3" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none" placeholder="Call notes, party response, next action..."></textarea>
+        </div>
+      </div>
+      <div class="flex gap-3 pt-1">
+        <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl text-sm transition">💾 Save Follow-up</button>
+        <button type="button" onclick="document.getElementById('fu-modal').classList.add('hidden')" class="px-5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50 transition">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+
+
+
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var inp = document.getElementById('search-input');
+  var dd  = document.getElementById('search-dropdown');
+  if (!inp || !dd) return;
+  var timer;
+  inp.addEventListener('input', function() {
+    clearTimeout(timer);
+    var q = this.value.trim();
+    if (q.length < 2) { dd.classList.add('hidden'); return; }
+    timer = setTimeout(function() {
+      fetch('/api/search?q=' + encodeURIComponent(q))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (!data.length) { dd.classList.add('hidden'); return; }
+          dd.innerHTML = data.map(function(r) {
+            var enc = encodeURIComponent(r.name);
+            return '<div class="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0" data-name="' + r.name.replace(/"/g,'&quot;') + '">' +
+              '<div class="font-semibold text-slate-800 text-sm">' + r.name + '</div>' +
+              '<div class="text-xs text-slate-400 mt-0.5">' + (r.agent||'-') + ' &middot; ' + (r.amount||'') + '</div>' +
+              '</div>';
+          }).join('');
+          dd.querySelectorAll('div[data-name]').forEach(function(el) {
+            el.addEventListener('click', function() {
+              window.location.href = '/ledger?party=' + encodeURIComponent(el.getAttribute('data-name'));
+            });
+          });
+          dd.classList.remove('hidden');
+        }).catch(function() { dd.classList.add('hidden'); });
+    }, 300);
+  });
+  document.addEventListener('click', function(e) {
+    if (dd && inp && !inp.contains(e.target) && !dd.contains(e.target))
+      dd.classList.add('hidden');
+  });
+});
+</script>
+
+
+
+
+{% endblock %}

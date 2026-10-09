@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Post-Dated Cheques{% endblock %}
+{% block content %}
+<div class="p-4 md:p-6 max-w-screen-xl mx-auto">
+
+  <!-- Header -->
+  <div class="flex items-start justify-between mb-5 flex-wrap gap-2">
+    <div>
+      <h1 class="text-xl md:text-2xl font-extrabold text-slate-900" style="font-family:'Space Grotesk',sans-serif;">
+        🏦 Post-Dated Cheques
+      </h1>
+      <p class="text-slate-500 text-sm mt-1">{{ today_date }} · {{ total_count }} cheque(s) pending clearance</p>
+    </div>
+    <a href="/dashboard" class="text-xs font-bold text-slate-500 hover:text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2">← Dashboard</a>
+  </div>
+
+  <!-- Smart Search -->
+  <div class="mb-4 relative">
+    <input id="pdc-search" type="text" autocomplete="off"
+      placeholder="🔍 Search party, agency, voucher no, mobile, state..."
+      class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500">
+    <div id="pdc-search-count" class="text-xs text-slate-400 mt-1"></div>
+  </div>
+
+  <!-- Quick date filters -->
+  <div class="bg-white rounded-xl border border-slate-200 p-3 mb-5 flex gap-2 flex-wrap items-center">
+    <span class="text-xs font-bold text-slate-400">Quick filter:</span>
+    <a href="/pdc?from_date={{ today_date }}&to_date={{ today_date }}" class="text-xs px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-blue-50 hover:border-blue-300 font-semibold text-slate-600">Today</a>
+    <a href="/pdc?days=7" class="text-xs px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-blue-50 hover:border-blue-300 font-semibold text-slate-600">Next 7 Days</a>
+    <a href="/pdc?days=30" class="text-xs px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-blue-50 hover:border-blue-300 font-semibold text-slate-600">Next 30 Days</a>
+    <a href="/pdc?overdue=1" class="text-xs px-3 py-1.5 rounded-lg border border-red-200 hover:bg-red-50 font-semibold text-red-600">Overdue</a>
+    {% if request.args.get('from_date') or request.args.get('days') or request.args.get('overdue') %}
+    <a href="/pdc" class="text-xs px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 font-semibold text-slate-600 ml-auto">✕ Clear date filter</a>
+    {% endif %}
+  </div>
+
+  <!-- Summary Cards -->
+  <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+    <div class="bg-teal-600 text-white rounded-xl p-5 relative overflow-hidden">
+      <div class="text-xs font-bold uppercase tracking-widest opacity-75 mb-1">Total PDC Amount</div>
+      <div class="text-2xl font-extrabold" style="font-family:'Space Grotesk',sans-serif;">
+        ₹{{ total_amount|indian }}
+        {% if total_amount >= 100000 %}<span class="text-sm opacity-75">({{ "%.2f"|format(total_amount/100000) }} L)</span>{% endif %}
+      </div>
+      <div class="text-xs opacity-65 mt-1">{{ total_count }} cheques across {{ summary|length }} parties</div>
+      <i class="ti ti-receipt-2 absolute bottom-3 right-4 text-5xl opacity-10"></i>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-xl p-5">
+      <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">This Month</div>
+      {% set this_month = records|selectattr('cheque_date','defined')|list %}
+      <div class="text-2xl font-extrabold text-teal-700" style="font-family:'Space Grotesk',sans-serif;">
+        {{ records|selectattr('cheque_date','ne',None)|list|length }}
+      </div>
+      <div class="text-xs text-slate-500 mt-1">cheques in pipeline</div>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-xl p-5">
+      <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Parties with PDC</div>
+      <div class="text-2xl font-extrabold text-slate-700" style="font-family:'Space Grotesk',sans-serif;">{{ summary|length }}</div>
+      <div class="text-xs text-slate-500 mt-1">unique parties</div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+    <!-- Full PDC List -->
+    <div class="lg:col-span-2">
+      <h3 class="text-sm font-bold text-slate-700 mb-2">📋 All Cheques (date-wise)</h3>
+      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div class="grid bg-slate-50 border-b-2 border-slate-200 px-3 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest" style="grid-template-columns:110px 1fr 120px 110px;">
+          <div>Cheque Date</div><div>Party</div><div>Voucher No</div><div class="text-right">Amount</div>
+        </div>
+        <div class="max-h-[700px] overflow-y-auto divide-y divide-slate-50">
+          {% if records %}
+            {% set ns = namespace(running=0) %}
+            {% for r in records %}
+            {% set ns.running = ns.running + r.amount %}
+            {% set today_str = today_date %}
+            {% set is_past = r.cheque_date|string < today_date|string %}
+            <div class="pdc-row grid items-center px-3 py-2.5 hover:bg-slate-50 {{ 'bg-red-50' if is_past else '' }}"
+                 data-search="{{ (r.party_name ~ ' ' ~ (r.agency_name or '') ~ ' ' ~ (r.agent_name or '') ~ ' ' ~ (r.voucher_number or '') ~ ' ' ~ (r.party_state or ''))|lower }}"
+                 style="grid-template-columns:110px 1fr 120px 110px;">
+              <div class="text-sm font-semibold {{ 'text-red-600' if is_past else 'text-teal-700' }}">
+                {{ r.cheque_date }}
+                {% if is_past %}<span class="text-xs text-red-400 block">overdue</span>{% endif %}
+              </div>
+              <div>
+                <a href="/ledger?party={{ r.party_name|urlencode }}" class="text-sm font-bold text-blue-700 hover:underline">{{ r.party_name }}</a>
+                <div class="text-xs text-slate-400">
+                  {{ r.agent_name or '' }}{% if r.agency_name and r.agency_name not in ('nan','None','') %} · {{ r.agency_name }}{% endif %}
+                  {% if r.party_state and r.party_state not in ('nan','None','') %} · {{ r.party_state }}{% endif %}
+                </div>
+                {% if r.narration %}<div class="text-xs text-slate-400 italic">{{ r.narration[:60] }}</div>{% endif %}
+              </div>
+              <div class="text-xs font-mono text-slate-500">{{ r.voucher_number or '—' }}</div>
+              <div class="text-sm font-bold text-right text-teal-700">₹{{ r.amount|indian }}</div>
+            </div>
+            {% endfor %}
+          {% else %}
+          <div class="px-4 py-10 text-center text-slate-400 text-sm">No PDC entries. Run Tally sync.</div>
+          {% endif %}
+        </div>
+        {% if records %}
+        <div class="px-3 py-2.5 bg-teal-50 border-t-2 border-teal-200 grid font-bold text-teal-700" style="grid-template-columns:110px 1fr 120px 110px;">
+          <div class="text-xs uppercase tracking-widest">Total</div>
+          <div></div>
+          <div></div>
+          <div class="text-right text-sm">₹{{ total_amount|indian }}</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Party-wise Summary -->
+    <div>
+      <h3 class="text-sm font-bold text-slate-700 mb-2">🏢 Party-wise Summary</h3>
+      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div class="max-h-[700px] overflow-y-auto divide-y divide-slate-50">
+          {% for s in summary %}
+          <div class="pdc-summary-row px-4 py-3 hover:bg-slate-50" data-search="{{ s.party_name|lower }}">
+            <a href="/ledger?party={{ s.party_name|urlencode }}" class="font-bold text-blue-700 text-sm hover:underline block truncate">{{ s.party_name }}</a>
+            <div class="flex items-center justify-between mt-1">
+              <span class="text-xs text-slate-400">{{ s.cheques }} cheque(s)</span>
+              <span class="text-sm font-extrabold text-teal-700">₹{{ s.total|indian }}</span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var inp = document.getElementById('pdc-search');
+  var countEl = document.getElementById('pdc-search-count');
+  if (!inp) return;
+  var rows = document.querySelectorAll('.pdc-row');
+  var summaryRows = document.querySelectorAll('.pdc-summary-row');
+  inp.addEventListener('input', function() {
+    var q = this.value.trim().toLowerCase();
+    var visible = 0;
+    rows.forEach(function(r) {
+      var match = !q || (r.dataset.search || '').indexOf(q) !== -1;
+      r.style.display = match ? '' : 'none';
+      if (match) visible++;
+    });
+    summaryRows.forEach(function(r) {
+      var match = !q || (r.dataset.search || '').indexOf(q) !== -1;
+      r.style.display = match ? '' : 'none';
+    });
+    countEl.textContent = q ? (visible + ' cheque(s) matching "' + this.value + '"') : '';
+  });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Analytics{% endblock %}
+{% block content %}
+<div class="p-6 max-w-screen-xl mx-auto">
+  <div class="mb-5">
+    <h1 class="text-2xl font-extrabold text-slate-900" style="font-family:'Space Grotesk',sans-serif;">Analytics & Reports</h1>
+    <p class="text-slate-500 text-sm mt-1">Aging · Agent performance · Agency summary · Recovery trends</p>
+  </div>
+  <div class="flex gap-1 bg-slate-100 p-1 rounded-xl mb-6 w-fit">
+    {% for tid,tl in [('aging','📊 Aging'),('agents','👤 Agents'),('agencies','🏢 Agencies'),('outstanding','🏆 Outstanding')] %}
+    <a href="/analytics?tab={{ tid }}" class="px-4 py-2 rounded-lg text-sm font-semibold transition {{ 'bg-white text-slate-800 shadow-sm' if request.args.get('tab','aging')==tid else 'text-slate-500 hover:text-slate-700' }}">{{ tl }}</a>
+    {% endfor %}
+  </div>
+  {% set tab = request.args.get('tab','aging') %}
+
+  {% if tab == 'aging' %}
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div class="px-5 py-3 border-b border-slate-100 bg-slate-50">
+        <span class="font-semibold text-slate-800 text-sm">Aging bucket summary</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="bg-slate-50 border-b border-slate-200">
+            <th class="text-left px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest">Bucket</th>
+            <th class="text-right px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest">Bills</th>
+            <th class="text-right px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest">Amount (₹)</th>
+          </tr></thead>
+          <tbody>
+            {% for row in aging_data %}
+            <tr class="border-b border-slate-50 hover:bg-slate-50">
+              <td class="px-4 py-3 font-medium text-slate-700">{{ row.Bucket }}</td>
+              <td class="px-4 py-3 text-right text-slate-600">{{ row.Bills }}</td>
+              <td class="px-4 py-3 text-right font-bold text-slate-800">₹{{ "{:,.0f}".format(row.Amount) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="px-4 py-8 text-center text-slate-400">No data. Run Tally sync.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="bg-white rounded-xl border border-slate-200 p-5">
+      <p class="font-semibold text-slate-800 text-sm mb-4">Aging chart</p>
+      <canvas id="agingChart" height="220"></canvas>
+    </div>
+  </div>
+
+  {% elif tab == 'agents' %}
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div class="px-5 py-3 border-b border-slate-100 bg-slate-50"><span class="font-semibold text-slate-800 text-sm">Agent performance</span></div>
+      <table class="w-full text-sm">
+        <thead><tr class="bg-slate-50 border-b border-slate-200">
+          <th class="text-left px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest">Agent</th>
+          <th class="text-right px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest">Tickets</th>
+          <th class="text-right px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest">Outstanding</th>
+        </tr></thead>
+        <tbody>
+          {% for row in agent_perf %}
+          <tr class="border-b border-slate-50 hover:bg-slate-50">
+            <td class="px-4 py-3 font-semibold text-slate-800">{{ row.agent_name }}</td>
+            <td class="px-4 py-3 text-right text-slate-600">{{ row.tickets }}</td>
+            <td class="px-4 py-3 text-right font-bold text-blue-700">₹{{ "{:,.0f}".format(row.outstanding) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="bg-white rounded-xl border border-slate-200 p-5">
+      <p class="font-semibold text-slate-800 text-sm mb-4">Outstanding by agent</p>
+      <canvas id="agentChart" height="220"></canvas>
+    </div>
+  </div>
+
+  {% elif tab == 'agencies' %}
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div class="px-5 py-3 border-b border-slate-100 bg-slate-50"><span class="font-semibold text-slate-800 text-sm">Agency performance</span></div>
+      <table class="w-full text-sm">
+        <thead><tr class="bg-slate-50 border-b border-slate-200">
+          <th class="text-left px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest">Agency</th>
+          <th class="text-right px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest">Tickets</th>
+          <th class="text-right px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest">Outstanding</th>
+        </tr></thead>
+        <tbody>
+          {% for row in agency_perf %}
+          <tr class="border-b border-slate-50 hover:bg-slate-50">
+            <td class="px-4 py-3 font-semibold text-slate-800">{{ row.agency_name }}</td>
+            <td class="px-4 py-3 text-right text-slate-600">{{ row.tickets }}</td>
+            <td class="px-4 py-3 text-right font-bold text-purple-700">₹{{ "{:,.0f}".format(row.outstanding) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="bg-white rounded-xl border border-slate-200 p-5">
+      <p class="font-semibold text-slate-800 text-sm mb-4">Outstanding by agency</p>
+      <canvas id="agencyChart" height="220"></canvas>
+    </div>
+  </div>
+
+  {% elif tab == 'outstanding' %}
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div class="px-5 py-3 border-b border-slate-100 bg-slate-50"><span class="font-semibold text-slate-800 text-sm">Top 20 outstanding parties</span></div>
+      <table class="w-full text-sm">
+        <thead><tr class="bg-slate-50 border-b border-slate-200">
+          <th class="text-left px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest">Party</th>
+          <th class="text-right px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest">Balance</th>
+        </tr></thead>
+        <tbody>
+          {% for row in top_out %}
+          <tr class="border-b border-slate-50 hover:bg-slate-50">
+            <td class="px-4 py-3 font-medium text-slate-800">{{ row.party_name }}</td>
+            <td class="px-4 py-3 text-right font-bold text-red-700">₹{{ "{:,.0f}".format(row.balance) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="bg-white rounded-xl border border-slate-200 p-5">
+      <p class="font-semibold text-slate-800 text-sm mb-4">Follow-up status split</p>
+      <canvas id="statusChart" height="220"></canvas>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+const COLORS = ['#185fa5','#0f6e56','#534ab7','#993c1d','#854f0b','#a32d2d','#3b6d11','#993556'];
+function mkBar(id, labels, data, color){
+  const el = document.getElementById(id);
+  if(!el) return;
+  new Chart(el,{type:'bar',data:{labels,datasets:[{data,backgroundColor:color||COLORS,borderRadius:2}]},
+    options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v>=100000?'₹'+(v/100000).toFixed(1)+'L':v>=1000?'₹'+(v/1000).toFixed(0)+'K':'₹'+v},grid:{color:'#f8fafc'}},x:{grid:{display:false},ticks:{maxRotation:30,font:{size:10}}}}}});
+}
+{% if tab=='aging' %}
+fetch('/api/aging-chart').then(r=>r.json()).then(d=>mkBar('agingChart',d.labels,d.data,'#185fa5'));
+{% elif tab=='agents' %}
+fetch('/api/agent-chart').then(r=>r.json()).then(d=>mkBar('agentChart',d.labels,d.data));
+{% elif tab=='agencies' %}
+fetch('/api/agency-chart').then(r=>r.json()).then(d=>mkBar('agencyChart',d.labels,d.data));
+{% elif tab=='outstanding' %}
+fetch('/api/status-chart').then(r=>r.json()).then(d=>{
+  new Chart(document.getElementById('statusChart'),{type:'doughnut',data:{labels:d.labels,datasets:[{data:d.data,backgroundColor:COLORS,borderWidth:0}]},
+    options:{responsive:true,plugins:{legend:{position:'bottom',labels:{font:{size:11},padding:12}}}}});
+});
+{% endif %}
+</script>
+{% endblock %}

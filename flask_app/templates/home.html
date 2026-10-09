@@ -1,0 +1,453 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+<div class="p-4 md:p-6 max-w-screen-xl mx-auto">
+
+  <!-- Header -->
+  <div class="flex items-start justify-between mb-5 flex-wrap gap-2">
+    <div>
+      <h1 class="text-xl md:text-2xl font-extrabold text-slate-900" style="font-family:'Space Grotesk',sans-serif;">
+        {% if role=='Owner' %}👑 Owner Overview
+        {% elif role=='Admin' %}🛡 Admin Dashboard
+        {% elif role=='Agent' %}👤 My Dashboard
+        {% elif role=='Agency' %}🏢 Agency Dashboard
+        {% else %}💼 My Dashboard{% endif %}
+      </h1>
+      <p class="text-slate-500 text-sm mt-1">{{ role }} · {{ username }}</p>
+    </div>
+    {% if last_sync %}
+    <div class="flex items-center gap-2 text-xs text-slate-400 bg-white border border-slate-200 rounded-lg px-3 py-2">
+      <div class="w-2 h-2 rounded-full bg-green-500"></div>
+      Last sync: <strong class="text-slate-600">{{ last_sync.synced_at|string|truncate(16,True,'') }}</strong>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if error %}
+  <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-5 text-red-700 text-sm">⚠️ {{ error }}</div>
+  {% endif %}
+
+  <!-- TOP 3 KPI CARDS -->
+  {% if role in ('Owner','Admin') %}
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+    <a href="/tickets" class="tile block rounded-xl p-5 text-white relative overflow-hidden" style="background:#185fa5;">
+      <div class="text-xs font-bold uppercase tracking-widest opacity-75 mb-1">Total Outstanding</div>
+      <div class="text-2xl font-extrabold leading-tight mb-1" style="font-family:'Space Grotesk',sans-serif;">{{ out }}</div>
+      <div class="text-xs opacity-65">All active debtor parties</div>
+      <i class="ti ti-currency-rupee absolute bottom-3 right-4 text-5xl opacity-10"></i>
+    </a>
+    <a href="/tickets?due=1" class="tile block rounded-xl p-5 text-white relative overflow-hidden" style="background:#9d2235;">
+      <div class="text-xs font-bold uppercase tracking-widest opacity-75 mb-1">Due Amount</div>
+      <div class="text-2xl font-extrabold leading-tight mb-1" style="font-family:'Space Grotesk',sans-serif;">{{ due_amount }}</div>
+      <div class="text-xs opacity-65">As on {{ today_date }} · Sundry Debtors, own credit terms</div>
+      <i class="ti ti-alert-triangle absolute bottom-3 right-4 text-5xl opacity-10"></i>
+    </a>
+    <a href="/tickets?unsettled=1" class="tile block rounded-xl p-5 text-white relative overflow-hidden" style="background:#854f0b;">
+      <div class="text-xs font-bold uppercase tracking-widest opacity-75 mb-1">Unsettled Amount</div>
+      <div class="text-2xl font-extrabold leading-tight mb-1" style="font-family:'Space Grotesk',sans-serif;">{{ unsettled_on_account }}</div>
+      <div class="text-xs opacity-65">Bills marked On Account - not allocated</div>
+      <i class="ti ti-receipt absolute bottom-3 right-4 text-5xl opacity-10"></i>
+    </a>
+    <a href="/ledger?party=X+A%2FC" class="tile block rounded-xl p-5 text-white relative overflow-hidden" style="background:#475569;">
+      <div class="text-xs font-bold uppercase tracking-widest opacity-75 mb-1">Suspense Amount</div>
+      <div class="text-2xl font-extrabold leading-tight mb-1" style="font-family:'Space Grotesk',sans-serif;">{{ suspense_amount }}</div>
+      <div class="text-xs opacity-65">X A/C - unidentified receipts</div>
+      <i class="ti ti-help-circle absolute bottom-3 right-4 text-5xl opacity-10"></i>
+    </a>
+  </div>
+  {% endif %}
+
+  {% if role in ('Owner','Admin') %}
+  <!-- PDC CARD -->
+  <div class="grid grid-cols-1 md:grid-cols-1 gap-4 mb-6">
+    <a href="/pdc" class="tile block rounded-xl p-5 text-white relative overflow-hidden" style="background:#0f6e56;">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-widest opacity-75 mb-1">Post-Dated Cheques (PDC)</div>
+          <div class="text-2xl font-extrabold leading-tight mb-1" style="font-family:'Space Grotesk',sans-serif;">{{ pdc_amount }}</div>
+          <div class="text-xs opacity-75">{{ pdc_count }} cheque(s) pending clearance</div>
+        </div>
+        <i class="ti ti-receipt-2 text-6xl opacity-15"></i>
+      </div>
+    </a>
+  </div>
+  {% endif %}
+
+  <!-- RESPONSIBILITY BUCKETS -->
+  <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+    <p class="text-xs font-bold text-slate-400 uppercase tracking-widest">Assigned Responsibility</p>
+    {% if unassigned_c > 0 and role in ('Owner','Admin') %}
+    <a href="/tickets?assigned=Unassigned" class="text-xs font-semibold text-slate-500 hover:text-slate-700 bg-slate-100 px-2.5 py-1 rounded-full">
+      ⚠️ {{ unassigned_c }} unassigned · {{ unassigned_a }}
+    </a>
+    {% endif %}
+  </div>
+  {% set palette = [
+    ('border-blue-200','border-blue-400','blue','bg-blue-600','bg-blue-100','bg-blue-500','text-blue-700','text-blue-600'),
+    ('border-amber-200','border-amber-400','amber','bg-amber-600','bg-amber-100','bg-amber-500','text-amber-700','text-amber-600'),
+    ('border-red-200','border-red-400','red','bg-red-700','bg-red-100','bg-red-600','text-red-700','text-red-600'),
+    ('border-purple-200','border-purple-400','purple','bg-purple-700','bg-purple-100','bg-purple-600','text-purple-700','text-purple-600'),
+    ('border-teal-200','border-teal-400','teal','bg-teal-700','bg-teal-100','bg-teal-600','text-teal-700','text-teal-600'),
+    ('border-pink-200','border-pink-400','pink','bg-pink-700','bg-pink-100','bg-pink-600','text-pink-700','text-pink-600'),
+  ] %}
+  {% if role in ('Owner','Admin') %}
+    {% set user_buckets = [] %}
+    {% for u in active_users if active_users is defined %}
+      {% set emoji = '👑' if u.role=='Owner' else '💼' %}
+      {% set _ = user_buckets.append({'name': u.username, 'emoji': emoji, 'role': u.role}) %}
+    {% endfor %}
+    {% if not user_buckets %}
+      {% set user_buckets = [{'name':'Accounts Team','emoji':'👩‍💼','role':'User'},{'name':'Senior Accountant','emoji':'🧑‍💼','role':'User'},{'name':'Owner','emoji':'👑','role':'Owner'}] %}
+    {% endif %}
+    <div class="grid grid-cols-1 md:grid-cols-{{ [user_buckets|length, 4]|min }} gap-4 mb-6">
+      {% for u in user_buckets %}
+      {% set p = palette[loop.index0 % palette|length] %}
+      {% set uc = user_ticket_counts.get(u.name, {}) if user_ticket_counts is defined else {} %}
+      {% set u_cnt = uc.get('cnt', 0) %}
+      {% set u_amt = uc.get('amt', 0) %}
+      <a href="/tickets?assigned={{ u.name|urlencode }}" class="tile block bg-white rounded-xl border-2 {{ p[0] }} p-5 hover:{{ p[1] }} hover:shadow-md transition-all">
+        <div class="flex items-center gap-2 mb-3 flex-wrap">
+          <span class="{{ p[3] }} text-white text-xs font-bold px-3 py-1 rounded-full">{{ u.emoji }} {{ u.name }}</span>
+          <span class="text-slate-400 text-xs">{{ u.role }}</span>
+        </div>
+        <div class="text-3xl font-extrabold {{ p[6] }} mb-1" style="font-family:'Space Grotesk',sans-serif;">{{ u_cnt }}</div>
+        <div class="text-sm text-slate-500">parties · <strong class="{{ p[6] }}">₹{{ u_amt|indian }}</strong></div>
+        <div class="mt-2 text-xs {{ p[7] }} font-semibold">View tickets →</div>
+      </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    {# Non-owner: show only their own card #}
+    {% set uc = user_ticket_counts.get(username, {}) if user_ticket_counts is defined else {} %}
+    {% set u_cnt = uc.get('cnt', 0) %}
+    {% set u_amt = uc.get('amt', 0) %}
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <a href="/tickets" class="tile block bg-white rounded-xl border-2 border-blue-200 p-5 hover:border-blue-400 hover:shadow-md transition-all">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-full">💼 {{ username }}</span>
+          <span class="text-slate-400 text-xs">My Parties</span>
+        </div>
+        <div class="text-3xl font-extrabold text-blue-700 mb-1" style="font-family:'Space Grotesk',sans-serif;">{{ u_cnt }}</div>
+        <div class="text-sm text-slate-500">parties assigned · <strong class="text-blue-700">₹{{ u_amt|indian }}</strong></div>
+        <div class="mt-2 text-xs text-blue-600 font-semibold">View my tickets →</div>
+      </a>
+    </div>
+  {% endif %}
+
+  <!-- FOLLOW-UP CALLS DONE (per-user, Owner sees all) -->
+  <div class="bg-white rounded-xl border border-slate-200 overflow-hidden mb-6">
+    <div class="px-4 py-3 border-b border-slate-100">
+      <span class="font-bold text-slate-700 text-sm">📞 Follow-up Calls Done</span>
+    </div>
+    {% if user_fu_list %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 border-b border-slate-200">
+          <tr>
+            <th class="px-4 py-2 text-left text-xs font-bold text-slate-400 uppercase">User</th>
+            <th class="px-4 py-2 text-center text-xs font-bold text-slate-400 uppercase">Today</th>
+            <th class="px-4 py-2 text-center text-xs font-bold text-slate-400 uppercase">Last 7 Days</th>
+            <th class="px-4 py-2 text-center text-xs font-bold text-slate-400 uppercase">Last 30 Days</th>
+            <th class="px-4 py-2 text-center text-xs font-bold text-slate-400 uppercase">Overall</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in user_fu_list %}
+          <tr class="border-b border-slate-50 last:border-0">
+            <td class="px-4 py-2.5 font-semibold text-slate-700">{{ u.username }}</td>
+            <td class="px-4 py-2.5 text-center font-bold text-slate-700">{{ u.today_c }}</td>
+            <td class="px-4 py-2.5 text-center font-bold text-slate-700">{{ u.d7_c }}</td>
+            <td class="px-4 py-2.5 text-center font-bold text-slate-700">{{ u.d30_c }}</td>
+            <td class="px-4 py-2.5 text-center font-bold text-slate-900">{{ u.overall_c }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="px-4 py-6 text-center text-slate-400 text-sm">No follow-up calls logged yet.</div>
+    {% endif %}
+  </div>
+
+  </div>
+
+  <!-- FOLLOW-UPS + TOP OUTSTANDING -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+
+    <div class="flex flex-col gap-4">
+
+      <!-- Today's Follow-ups -->
+      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-amber-50">
+          <span class="font-bold text-amber-800 text-sm">📅 Today's Follow-ups ({{ today_fu_count }})</span>
+          <a href="/followups?tab=today" class="text-amber-600 text-xs font-bold hover:underline">View all →</a>
+        </div>
+        {% if today_fu %}
+        <div class="divide-y divide-slate-50 max-h-[440px] overflow-y-auto">
+          {% for f in today_fu %}
+          <div class="px-4 py-3 cursor-pointer hover:bg-slate-50"
+               onclick="openFuPopup({{ loop.index0 }}, 'today')">
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex-1 min-w-0">
+                <div class="font-bold text-slate-800 text-sm">{{ f.party_name }}</div>
+                <div class="text-xs text-slate-400 mt-0.5">
+                  {% if f.mobile_display %}📱 {{ f.mobile_display }} · {% endif %}
+                  {% if f.agent_name %}{{ f.agent_name }}{% endif %}
+                  {% if f.agency_name %} · {{ f.agency_name }}{% endif %}
+                  {% if f.seller_name %} · {{ f.seller_name }}{% endif %}
+                </div>
+                <div class="text-xs font-semibold text-red-700 mt-0.5">
+                  Due: ₹{{ f.outstanding or 0|indian }}
+                </div>
+              </div>
+              <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                {% if f.priority=='High' %}<span class="badge bg-red-100 text-red-700">High</span>
+                {% elif f.priority=='Medium' %}<span class="badge bg-amber-100 text-amber-700">Med</span>
+                {% else %}<span class="badge bg-green-100 text-green-700">Low</span>{% endif %}
+                <span class="text-xs text-blue-600 font-semibold">Tap to update →</span>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="px-4 py-6 text-center text-green-600 text-sm font-semibold">✅ No follow-ups due today!</div>
+        {% endif %}
+      </div>
+
+      <!-- Missed Follow-ups -->
+      <div class="bg-white rounded-xl border border-red-200 overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-red-100 bg-red-50">
+          <span class="font-bold text-red-800 text-sm">🔴 Missed Follow-ups ({{ missed_count }})</span>
+          <a href="/followups?tab=overdue" class="text-red-600 text-xs font-bold hover:underline">View all →</a>
+        </div>
+        {% if missed_fu %}
+        <div class="divide-y divide-slate-50 max-h-[440px] overflow-y-auto">
+          {% for f in missed_fu %}
+          <div class="px-4 py-3 cursor-pointer hover:bg-slate-50"
+               onclick="openFuPopup({{ loop.index0 }}, 'missed')">
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex-1 min-w-0">
+                <div class="font-bold text-slate-800 text-sm">{{ f.party_name }}</div>
+                <div class="text-xs text-slate-400 mt-0.5">
+                  {% if f.mobile_display %}📱 {{ f.mobile_display }} · {% endif %}
+                  {% if f.agent_name %}{{ f.agent_name }}{% endif %}
+                  {% if f.agency_name %} · {{ f.agency_name }}{% endif %}
+                </div>
+                <div class="text-xs mt-0.5">
+                  <span class="text-red-600 font-semibold">Was due: {{ f.next_followup_date }}</span>
+                  <span class="text-red-700 font-bold ml-2">₹{{ f.outstanding or 0|indian }}</span>
+                </div>
+              </div>
+              <span class="badge bg-red-100 text-red-700 flex-shrink-0">Missed</span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="px-4 py-6 text-center text-green-600 text-sm font-semibold">✅ No missed follow-ups!</div>
+        {% endif %}
+      </div>
+      <!-- Upcoming Follow-ups -->
+      <div class="bg-white rounded-xl border border-blue-200 overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-blue-100 bg-blue-50">
+          <span class="font-bold text-blue-800 text-sm">📆 Upcoming Follow-ups ({{ upcoming_count }})</span>
+          <a href="/followups?tab=upcoming" class="text-blue-600 text-xs font-bold hover:underline">View all →</a>
+        </div>
+        {% if upcoming_fu %}
+        <div class="divide-y divide-slate-50 max-h-[440px] overflow-y-auto">
+          {% for f in upcoming_fu %}
+          <div class="px-4 py-3 cursor-pointer hover:bg-slate-50"
+               onclick="openFuPopup({{ loop.index0 }}, 'upcoming')">
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex-1 min-w-0">
+                <div class="font-bold text-slate-800 text-sm">{{ f.party_name }}</div>
+                <div class="text-slate-400 text-xs mt-0.5">
+                  {% if f.mobile_display %}📱 {{ f.mobile_display }} · {% endif %}
+                  {{ f.agent_name or '—' }}{% if f.agency_name %} · {{ f.agency_name }}{% endif %}
+                </div>
+                <div class="text-xs mt-0.5">
+                  <span class="text-blue-600 font-semibold">Due: {{ f.next_followup_date }}</span>
+                  <span class="text-red-700 font-bold ml-2">₹{{ f.outstanding or 0|indian }}</span>
+                </div>
+              </div>
+              <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                {% if f.priority=='High' %}<span class="badge bg-red-100 text-red-700">High</span>
+                {% elif f.priority=='Medium' %}<span class="badge bg-amber-100 text-amber-700">Med</span>
+                {% else %}<span class="badge bg-green-100 text-green-700">Low</span>{% endif %}
+                <span class="text-xs text-blue-600 font-semibold">Tap →</span>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="px-4 py-6 text-center text-blue-600 text-sm font-semibold">✅ No upcoming follow-ups!</div>
+        {% endif %}
+      </div>
+
+    </div>
+
+    <!-- Top Outstanding -->
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+        <span class="font-bold text-slate-800 text-sm">Top Outstanding Parties</span>
+        <a href="/tickets" class="text-blue-600 text-xs font-bold hover:underline">All tickets →</a>
+      </div>
+      {% set av_colors = ['dbeafe|1e40af','fef3c7|92400e','ede9fe|5b21b6','d1fae5|065f46','fee2e2|991b1b','fce7f3|9d174d','e0f2fe|0c4a6e','ecfdf5|064e3b','fef9c3|713f12','fdf4ff|7e22ce'] %}
+      {% if top %}
+      <div class="divide-y divide-slate-50">
+        {% for t in top %}
+        {% set ac = av_colors[loop.index0 % av_colors|length].split('|') %}
+        <div class="flex items-start gap-3 px-4 py-3 hover:bg-slate-50">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-extrabold flex-shrink-0 mt-0.5" style="background:#{{ ac[0] }};color:#{{ ac[1] }};">{{ t.party_name[:2].upper() }}</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <a href="/ledger?party={{ t.party_name|urlencode }}" class="font-bold text-blue-700 text-sm hover:underline">{{ t.party_name }}</a>
+              {% if t.party_mobile and t.party_mobile|string|length > 5 %}
+              <span class="text-slate-400 text-xs">📱 {{ t.party_mobile[-10:] }}</span>
+              {% endif %}
+              <span class="font-extrabold text-red-700 text-sm" style="font-family:'Space Grotesk',sans-serif;">₹{{ t.balance|indian }}</span>
+            </div>
+            <div class="text-slate-400 text-xs mt-0.5">
+              {{ t.agent_name or '—' }} · {{ t.agency_name or 'Direct' }} · {{ t.party_state or '—' }}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="px-4 py-10 text-center text-slate-400 text-sm">No data. Run Tally sync.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Follow-up Popup Modal -->
+<div id="fu-popup" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-screen overflow-y-auto">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white z-10">
+      <div>
+        <h3 class="font-bold text-slate-800 text-base" id="popup-title" style="font-family:'Space Grotesk',sans-serif;">Follow-up</h3>
+        <div class="text-xs text-slate-400 mt-0.5" id="popup-meta"></div>
+      </div>
+      <button onclick="closeFuPopup()" class="text-slate-400 hover:text-slate-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-xl">✕</button>
+    </div>
+
+    <div class="p-5">
+      <!-- Party info strip -->
+      <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div><div class="text-xs font-bold text-slate-400 uppercase" style="font-size:9px;">Outstanding</div><div class="font-extrabold text-red-700 text-sm mt-0.5" id="popup-outstanding">—</div></div>
+          <div><div class="text-xs font-bold text-slate-400 uppercase" style="font-size:9px;">Mobile</div><div class="font-semibold text-slate-700 text-sm mt-0.5" id="popup-mobile">—</div></div>
+          <div><div class="text-xs font-bold text-slate-400 uppercase" style="font-size:9px;">Agent</div><div class="font-semibold text-slate-700 text-sm mt-0.5" id="popup-agent">—</div></div>
+          <div><div class="text-xs font-bold text-slate-400 uppercase" style="font-size:9px;">Agency</div><div class="font-semibold text-slate-700 text-sm mt-0.5" id="popup-agency">—</div></div>
+        </div>
+      </div>
+
+      <!-- Past history -->
+      <div class="mb-4">
+        <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Past Communication</div>
+        <div id="popup-history" class="space-y-2 max-h-40 overflow-y-auto"></div>
+      </div>
+
+      <!-- Update status -->
+      <div class="bg-blue-50 border border-blue-200 rounded-xl p-4">
+        <div class="text-xs font-bold text-blue-700 uppercase tracking-widest mb-3">Update This Follow-up</div>
+        <form method="POST" action="/followups/update" class="space-y-3">
+          <input type="hidden" name="id" id="popup-fu-id">
+          <input type="hidden" name="tab" value="today">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-bold text-slate-500 block mb-1">New Status</label>
+              <select name="status" id="popup-status" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
+                <option>Pending</option><option>Followup Done</option>
+                <option>Promise To Pay</option><option>Paid</option>
+                <option>Dispute</option><option>Escalated</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-bold text-slate-500 block mb-1">Next Follow-up</label>
+              <input type="date" name="next_date" id="popup-next-date" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
+            </div>
+            <div class="col-span-2">
+              <label class="text-xs font-bold text-slate-500 block mb-1">Remarks / Notes</label>
+              <textarea name="notes" id="popup-notes" rows="2" placeholder="Call outcome, party response, next action..."
+                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white resize-none"></textarea>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-sm transition">Update Status</button>
+            <a id="popup-ledger-link" href="#" class="flex items-center gap-1.5 px-4 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50 font-semibold transition">
+              <i class="ti ti-book text-sm"></i> Ledger
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Store follow-up data
+const TODAY_FU = {{ today_fu|tojson }};
+const MISSED_FU = {{ missed_fu|tojson }};
+const UPCOMING_FU = {{ upcoming_fu|tojson }};
+
+function openFuPopup(idx, type) {
+  const data = type === 'today' ? TODAY_FU[idx] : type === 'upcoming' ? UPCOMING_FU[idx] : MISSED_FU[idx];
+  if (!data) return;
+
+  document.getElementById('fu-popup').classList.remove('hidden');
+  document.getElementById('popup-title').textContent = data.party_name;
+  document.getElementById('popup-meta').textContent =
+    (data.next_followup_date ? 'Due: ' + data.next_followup_date : '') +
+    (data.status ? ' · ' + data.status : '');
+
+  document.getElementById('popup-outstanding').textContent =
+    data.outstanding ? '₹' + Number(data.outstanding).toLocaleString('en-IN') : '—';
+  document.getElementById('popup-mobile').textContent = data.mobile_display || '—';
+  document.getElementById('popup-agent').textContent = data.agent_name || '—';
+  document.getElementById('popup-agency').textContent = data.agency_name || '—';
+  document.getElementById('popup-fu-id').value = data.id;
+  document.getElementById('popup-ledger-link').href = '/ledger?party=' + encodeURIComponent(data.party_name);
+
+  // Set today as default next follow-up
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('popup-next-date').value = today;
+
+  // Set current status
+  const sel = document.getElementById('popup-status');
+  for (let i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === data.status) { sel.selectedIndex = i; break; }
+  }
+
+  // Past history
+  const hist = data.history || [];
+  const histEl = document.getElementById('popup-history');
+  if (hist.length === 0) {
+    histEl.innerHTML = '<div class="text-xs text-slate-400 italic">No previous communication recorded.</div>';
+  } else {
+    histEl.innerHTML = hist.map(h => `
+      <div class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs font-bold text-slate-600">${h.last_call_date || '—'}</span>
+          <span class="badge bg-slate-100 text-slate-600">${h.status || '—'}</span>
+        </div>
+        <div class="text-xs text-slate-500">${h.notes || 'No notes'}</div>
+        <div class="text-xs text-slate-400 mt-0.5">By: ${h.assigned_to || '—'}</div>
+      </div>
+    `).join('');
+  }
+}
+
+function closeFuPopup() {
+  document.getElementById('fu-popup').classList.add('hidden');
+}
+
+// Close on backdrop click
+document.getElementById('fu-popup').addEventListener('click', function(e) {
+  if (e.target === this) closeFuPopup();
+});
+</script>
+{% endblock %}

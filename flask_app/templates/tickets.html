@@ -1,0 +1,318 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="padding:12px 16px;max-width:100%;">
+
+  <!-- Header -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+    <div>
+      <div style="font-size:20px;font-weight:900;color:#0f172a;">🎫 Tickets v2</div>
+      <div style="font-size:12px;color:#64748b;margin-top:2px;">{{ today_date }} &middot; <span id="vc">{{ total_parties }}</span> parties</div>
+    </div>
+    <a href="/tickets" style="font-size:12px;border:1px solid #e2e8f0;border-radius:8px;padding:6px 12px;color:#64748b;text-decoration:none;">← Classic View</a>
+  </div>
+
+  <!-- User cards on top -->
+  <div style="display:flex;flex-wrap:nowrap;gap:8px;overflow-x:auto;margin-bottom:12px;padding-bottom:4px;">
+    {% for u in user_cards %}
+    <div onclick="filterUser('{{ u.name|lower }}')" style="flex-shrink:0;background:#fff;border:2px solid #e2e8f0;border-radius:10px;padding:10px 14px;cursor:pointer;min-width:130px;transition:border-color 0.2s;" id="uc-{{ loop.index }}">
+      <div style="font-size:11px;font-weight:800;color:#6366f1;">👤 {{ u.name }}</div>
+      <div style="font-size:18px;font-weight:900;color:#0f172a;">{{ u.cnt }}</div>
+      <div style="font-size:11px;color:#64748b;">₹{{ u.amt|indian }}</div>
+    </div>
+    {% endfor %}
+    <div onclick="filterUser('unassigned')" style="flex-shrink:0;background:#fefce8;border:2px solid #fde68a;border-radius:10px;padding:10px 14px;cursor:pointer;min-width:130px;">
+      <div style="font-size:11px;font-weight:800;color:#d97706;">⚠ Unassigned</div>
+      <div style="font-size:18px;font-weight:900;color:#b45309;">{{ unassigned_card.cnt }}</div>
+      <div style="font-size:11px;color:#64748b;">₹{{ unassigned_card.amt|indian }}</div>
+    </div>
+    <div onclick="filterKPI('all')" style="flex-shrink:0;background:#eff6ff;border:2px solid #bfdbfe;border-radius:10px;padding:10px 14px;cursor:pointer;min-width:100px;">
+      <div style="font-size:11px;font-weight:800;color:#2563eb;">🔄 All</div>
+      <div style="font-size:18px;font-weight:900;color:#1d4ed8;">{{ total_parties }}</div>
+      <div style="font-size:11px;color:#64748b;">parties</div>
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div style="display:grid;grid-template-columns:repeat(2,1fr) repeat(2,1fr);gap:8px;margin-bottom:12px;">
+    <div onclick="filterKPI('all')" style="background:#fee2e2;border:2px solid #fca5a5;border-radius:10px;padding:10px 14px;cursor:pointer;">
+      <div style="font-size:9px;font-weight:800;color:#dc2626;text-transform:uppercase;">Net Due</div>
+      <div style="font-size:16px;font-weight:900;color:#991b1b;" id="kv-net">₹{{ total_net|indian }}</div>
+    </div>
+    <div onclick="filterKPI('pdc')" style="background:#f0fdf4;border:2px solid #86efac;border-radius:10px;padding:10px 14px;cursor:pointer;">
+      <div style="font-size:9px;font-weight:800;color:#16a34a;text-transform:uppercase;">PDC Total</div>
+      <div style="font-size:16px;font-weight:900;color:#15803d;">₹{{ total_pdc|indian }}</div>
+    </div>
+    <div onclick="filterKPI('no_agency')" style="background:#f1f5f9;border:2px solid #cbd5e1;border-radius:10px;padding:10px 14px;cursor:pointer;">
+      <div style="font-size:9px;font-weight:800;color:#475569;text-transform:uppercase;">No Agency</div>
+      <div style="font-size:16px;font-weight:900;color:#334155;">{{ no_agency }}</div>
+    </div>
+    <div onclick="filterKPI('no_ag_mob')" style="background:#fdf4ff;border:2px solid #e9d5ff;border-radius:10px;padding:10px 14px;cursor:pointer;">
+      <div style="font-size:9px;font-weight:800;color:#7c3aed;text-transform:uppercase;">No Agency Mobile</div>
+      <div style="font-size:16px;font-weight:900;color:#6d28d9;">{{ no_ag_mob }}</div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+    <input id="t2s" type="text" autocomplete="off" placeholder="🔍 Search party, agency, mobile..."
+      style="flex:1;min-width:200px;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:13px;outline:none;">
+    <select id="t2ag" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:13px;min-width:160px;">
+      <option value="">All Agencies</option>
+      {% set sa=[] %}{% for t in tickets %}{% set ag=t.agency_full or '' %}
+      {% if ag and ag not in sa %}{% if sa.append(ag) %}{% endif %}<option value="{{ ag|lower }}">{{ ag[:35] }}</option>{% endif %}{% endfor %}
+    </select>
+    <select id="t2u" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:13px;">
+      <option value="">All Users</option>
+      {% set su=[] %}{% for t in tickets %}{% if t.assigned_to and t.assigned_to not in su %}
+      {% if su.append(t.assigned_to) %}{% endif %}<option value="{{ t.assigned_to|lower }}">{{ t.assigned_to }}</option>{% endif %}{% endfor %}
+    </select>
+    <button onclick="clearT2()" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer;background:#f8fafc;color:#64748b;">✕ Clear</button>
+  </div>
+
+  <!-- Table -->
+  <div style="overflow-x:auto;border-radius:12px;border:1px solid #e2e8f0;">
+    <table style="width:100%;border-collapse:collapse;min-width:1100px;">
+      <thead>
+        <tr style="background:#1e293b;color:#fff;font-size:11px;">
+          <th onclick="srt('pn')" style="padding:10px 12px;text-align:left;min-width:200px;cursor:pointer;">PARTY <span id="si-pn"></span></th>
+          <th onclick="srt('bills')" style="padding:10px 8px;text-align:center;width:55px;cursor:pointer;">BILLS <span id="si-bills"></span></th>
+          <th onclick="srt('overdue')" style="padding:10px 8px;text-align:center;width:70px;cursor:pointer;">MAX DUE <span id="si-overdue"></span></th>
+          <th onclick="srt('ag')" style="padding:10px 12px;text-align:left;min-width:160px;cursor:pointer;">AGENCY · MOBILE <span id="si-ag"></span></th>
+          <th onclick="srt('usr')" style="padding:10px 8px;text-align:left;width:130px;cursor:pointer;">ASSIGNED <span id="si-usr"></span></th><th onclick="srt('asgdt')" style="padding:10px 8px;text-align:center;width:80px;cursor:pointer;">ASSGN DATE <span id="si-asgdt"></span></th>
+          <th onclick="srt('net')" style="padding:10px 12px;text-align:right;width:120px;cursor:pointer;">DUE AMT <span id="si-net">▼</span></th>
+          <th onclick="srt('cr')" style="padding:10px 8px;text-align:center;width:60px;cursor:pointer;">CREDIT <span id="si-cr"></span></th>
+          <th onclick="srt('pdc')" style="padding:10px 12px;text-align:right;width:100px;cursor:pointer;">PDC <span id="si-pdc"></span></th>
+          <th onclick="srt('fu')" style="padding:10px 8px;text-align:center;width:60px;cursor:pointer;">CALLS <span id="si-fu"></span></th>
+        </tr>
+      </thead>
+      <tbody id="t2b">
+        {% for t in tickets %}
+        {% set ag=t.agency_full or '' %}
+        {% set ap=(t.agency_phone or '')|string|replace(' ','')|replace('+91','') %}
+        {% set mob=(t.party_mobile or '')|string|replace(' ','')|replace('+91','') %}
+        <tr class="t2r" style="border-bottom:1px solid #f1f5f9;"
+            data-pn="{{ t.party_name|lower }}"
+            data-ag="{{ ag|lower }}"
+            data-usr="{{ (t.assigned_to or '')|lower }}"
+            data-net="{{ t.net_due|float }}"
+            data-pdc="{{ t.pdc_total|float }}"
+            data-bills="{{ t.due_count|int }}"
+            data-cr="{{ t.credit_days|int }}"
+            data-overdue="{{ t.max_overdue|int }}"
+            data-fu="{{ t.fu_count|int }}"
+            data-asgdt="{{ t.assigned_on|string if t.assigned_on else '' }}"
+            data-has-pdc="{{ '1' if t.pdc_total|float > 0 else '0' }}"
+            data-unassigned="{{ '1' if not t.assigned_to else '0' }}"
+            data-no-agency="{{ '1' if not ag else '0' }}"
+            data-no-ag-mob="{{ '1' if ag and not t.agency_phone else '0' }}">
+          <!-- Party -->
+          <td style="padding:8px 12px;">
+            <a href="/ledger?party={{ t.party_name|urlencode }}"
+               style="font-weight:700;color:#1d4ed8;text-decoration:none;font-size:13px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px;">
+              {% if t.ticket_number %}<span style="font-size:10px;color:#94a3b8;margin-right:2px;">{{ t.ticket_number }}</span>{% endif %}{{ t.party_name }}</a>
+            {% if mob|length >= 10 %}<div style="font-size:11px;color:#94a3b8;">📱 {{ mob[-10:] }}</div>{% endif %}
+          </td>
+          <!-- Bills count -->
+          <td style="padding:8px;text-align:center;">
+            <span style="font-weight:700;color:{% if t.due_count|int > 5 %}#dc2626{% elif t.due_count|int > 2 %}#d97706{% else %}#475569{% endif %};">{{ t.due_count or 0 }}</span>
+          </td>
+          <!-- Max overdue days -->
+          <td style="padding:8px;text-align:center;">
+            {% set od = t.max_overdue|int %}
+            <span style="font-size:11px;font-weight:700;padding:2px 5px;border-radius:5px;background:{% if od > 180 %}#fef2f2;color:#dc2626{% elif od > 90 %}#fff7ed;color:#ea580c{% elif od > 30 %}#fefce8;color:#ca8a04{% else %}#f0fdf4;color:#16a34a{% endif %};">{{ od }}d</span>
+          </td>
+          <!-- Agency + Mobile -->
+          <td style="padding:8px 12px;">
+            {% if ag %}<div style="font-size:12px;font-weight:600;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px;">{{ ag }}</div>
+            {% elif not mob %}<div style="font-size:11px;color:#fca5a5;font-style:italic;">⚠ Missing</div>{% endif %}
+            {% if ap|length >= 10 %}<a href="tel:{{ ap[-10:] }}" style="font-size:11px;color:#3b82f6;text-decoration:none;">📱 {{ ap[-10:] }}</a>
+            {% elif ag and ag not in ('SELF','CASH','self','cash') and not mob %}<div style="font-size:11px;color:#fca5a5;">⚠ No mobile</div>{% endif %}
+          </td>
+          <!-- Assigned - dropdown for Owner -->
+          <td style="padding:8px;">
+            {% if role == "Owner" %}
+            <select onchange="reassign('{{ t.party_name|replace("'","\\'")|e }}', this.value)"
+              style="font-size:11px;border:1px solid #e2e8f0;border-radius:6px;padding:2px 4px;max-width:110px;background:#fff;">
+              <option value="">— Unassigned</option>
+              {% for u in active_users %}
+              <option value="{{ u }}" {% if t.assigned_to == u %}selected{% endif %}>{{ u }}</option>
+              {% endfor %}
+            </select>
+            {% else %}
+              {% if t.assigned_to %}<span style="font-size:11px;font-weight:700;background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:20px;white-space:nowrap;">{{ t.assigned_to }}</span>
+              {% else %}<span style="font-size:11px;color:#f59e0b;font-weight:700;">Unassigned</span>{% endif %}
+            {% endif %}
+          </td>
+          <!-- Assigned On -->
+          <td style="padding:8px;text-align:center;">
+            {% if t.assigned_on %}
+            <span style="font-size:11px;color:#475569;">{{ t.assigned_on|string|truncate(10,True,'') }}</span>
+            {% else %}<span style="color:#cbd5e1;font-size:11px;">—</span>{% endif %}
+          </td>
+          <!-- Net Due -->
+          <td style="padding:8px 12px;text-align:right;white-space:nowrap;">
+            <span style="font-weight:800;color:{% if t.net_due|float > 500000 %}#991b1b{% elif t.net_due|float > 100000 %}#c2410c{% else %}#374151{% endif %};">₹{{ t.net_due|float|indian }}</span>
+          </td>
+          <!-- Credit -->
+          <td style="padding:8px;text-align:center;">
+            <span style="font-size:11px;font-weight:700;padding:2px 5px;border-radius:5px;background:{% if t.credit_days|int >= 90 %}#dcfce7;color:#15803d{% elif t.credit_days|int >= 60 %}#fef9c3;color:#92400e{% else %}#fee2e2;color:#991b1b{% endif %};">{{ t.credit_days }}d</span>
+          </td>
+          <!-- PDC -->
+          <td style="padding:8px 12px;text-align:right;white-space:nowrap;">
+            {% if t.pdc_total|float > 0 %}<span style="color:#15803d;font-weight:600;font-size:12px;">₹{{ t.pdc_total|float|indian }}</span>
+            {% else %}<span style="color:#cbd5e1;font-size:11px;">—</span>{% endif %}
+          </td>
+          <!-- Follow-up calls -->
+          <td style="padding:8px;text-align:center;">
+            <a href="/followups?q={{ t.party_name|urlencode }}" style="text-decoration:none;">
+              {% if t.fu_count|int > 0 %}
+              <span style="font-size:11px;font-weight:700;background:#dbeafe;color:#1d4ed8;padding:2px 6px;border-radius:10px;">{{ t.fu_count }}</span>
+              {% else %}
+              <span style="font-size:11px;color:#fca5a5;font-weight:600;">0</span>
+              {% endif %}
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr style="background:#1e293b;color:#fff;font-size:12px;font-weight:700;">
+          <td style="padding:8px 12px;" id="f-c">{{ total_parties }} parties</td>
+          <td></td><td></td><td></td><td></td><td></td>
+          <td style="padding:8px 12px;text-align:right;" id="f-n">₹{{ total_net|indian }}</td>
+          <td></td>
+          <td style="padding:8px 12px;text-align:right;color:#86efac;" id="f-p">₹{{ total_pdc|indian }}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+
+<script>
+var _sc='net',_sa=false,_kpi='all',_usr='';
+function fmt(n){return '₹'+Math.round(n).toLocaleString('en-IN');}
+function rows(){return Array.from(document.querySelectorAll('.t2r'));}
+
+function filterUser(u){
+  _usr=u; _kpi='all';
+  document.getElementById('t2s').value='';
+  document.getElementById('t2ag').value='';
+  document.getElementById('t2u').value=u==='unassigned'?'':u;
+  applyAll();
+}
+
+function filterKPI(kpi){_kpi=kpi;_usr='';updateURL();applyAll();}
+
+function applyAll(){
+  var q=(document.getElementById('t2s').value||'').toLowerCase().trim();
+  var ag=(document.getElementById('t2ag').value||'').toLowerCase();
+  var us=(document.getElementById('t2u').value||'').toLowerCase();
+  var n=0,net=0,pdc=0;
+  rows().forEach(function(r){
+    var ok=true;
+    if(q && r.dataset.pn.indexOf(q)===-1 && r.dataset.ag.indexOf(q)===-1 && r.dataset.usr.indexOf(q)===-1) ok=false;
+    if(ag && r.dataset.ag.indexOf(ag)===-1) ok=false;
+    if(us && r.dataset.usr!==us) ok=false;
+    if(_usr==='unassigned' && r.dataset.unassigned!=='1') ok=false;
+    if(_kpi==='pdc' && r.dataset.hasPdc!=='1') ok=false;
+    if(_kpi==='no_agency' && r.dataset.noAgency!=='1') ok=false;
+    if(_kpi==='no_ag_mob' && r.dataset.noAgMob!=='1') ok=false;
+    r.style.display=ok?'':'none';
+    if(ok){n++;net+=parseFloat(r.dataset.net||0);pdc+=parseFloat(r.dataset.pdc||0);}
+  });
+  document.getElementById('f-c').textContent=n+' parties';
+  document.getElementById('f-n').textContent=fmt(net);
+  document.getElementById('f-p').textContent=pdc>0?fmt(pdc):'—';
+  document.getElementById('kv-net').textContent=fmt(net);
+  document.getElementById('vc').textContent=n;
+}
+
+function srt(col){
+  if(_sc===col){_sa=!_sa;}else{_sa=false;}_sc=col;
+  document.querySelectorAll('[id^="si-"]').forEach(function(e){e.textContent='';});
+  var si=document.getElementById('si-'+col);if(si)si.textContent=_sa?' ▲':' ▼';
+  var body=document.getElementById('t2b');
+  var rs=rows();
+  rs.sort(function(a,b){
+    var av,bv,numMap={net:'net',pdc:'pdc',bills:'bills',cr:'cr',overdue:'overdue',fu:'fu'};
+    if(numMap[col]){
+      av=parseFloat(a.dataset[numMap[col]]||0);bv=parseFloat(b.dataset[numMap[col]]||0);
+      return _sa?av-bv:bv-av;
+    }
+    av=(col==='pn'?a.dataset.pn:col==='ag'?a.dataset.ag:a.dataset.usr)||'';
+    bv=(col==='pn'?b.dataset.pn:col==='ag'?b.dataset.ag:b.dataset.usr)||'';
+    return _sa?av.localeCompare(bv):bv.localeCompare(av);
+  });
+  rs.forEach(function(r){body.appendChild(r);});
+}
+
+function clearT2(){
+  _kpi='all';_usr='';history.replaceState(null,'',window.location.pathname);
+  document.getElementById('t2s').value='';
+  document.getElementById('t2ag').value='';
+  document.getElementById('t2u').value='';
+  history.replaceState(null,'',window.location.pathname);
+  applyAll();
+}
+
+function reassign(party, user) {
+  var fd = new FormData();
+  fd.append('party', party);
+  fd.append('assignee', user);
+  fetch('/tickets/assign', {method:'POST', body:fd, credentials:'same-origin'})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.ok) {
+        // Flash brief confirmation
+        var msg = document.createElement('div');
+        msg.textContent = (user || 'Unassigned') + ' ✓';
+        msg.style.cssText = 'position:fixed;top:16px;right:16px;background:#16a34a;color:#fff;padding:8px 16px;border-radius:8px;font-weight:700;font-size:13px;z-index:9999;';
+        document.body.appendChild(msg);
+        setTimeout(function(){msg.remove();},2000);
+      }
+    });
+}
+
+function updateURL(){
+  var p=new URLSearchParams();
+  var q=document.getElementById('t2s').value.trim();
+  var ag=document.getElementById('t2ag').value;
+  var u=document.getElementById('t2u').value;
+  if(q) p.set('q',q);
+  if(ag) p.set('ag',ag);
+  if(_usr==='unassigned') p.set('usr','unassigned');
+  else if(u) p.set('usr',u);
+  if(_kpi&&_kpi!=='all') p.set('kpi',_kpi);
+  history.replaceState(null,'',window.location.pathname+(p.toString()?'?'+p.toString():''));
+}
+document.addEventListener('DOMContentLoaded',function(){
+  // Restore filters from URL params
+  var params = new URLSearchParams(window.location.search);
+  if(params.get('q'))    document.getElementById('t2s').value  = params.get('q');
+  if(params.get('ag'))   document.getElementById('t2ag').value = params.get('ag');
+  if(params.get('kpi')) _kpi = params.get('kpi');
+  var _su=params.get('usr')||'';
+  if(_su==='unassigned'){_usr='unassigned';}
+  else if(_su){document.getElementById('t2u').value=_su;}
+
+  document.getElementById('t2s').addEventListener('input', function(){ updateURL(); applyAll(); });
+  document.getElementById('t2ag').addEventListener('change', function(){ updateURL(); applyAll(); });
+  document.getElementById('t2u').addEventListener('change', function(){ updateURL(); applyAll(); });
+  applyAll();
+});
+
+function updateURL(){
+  var params = new URLSearchParams();
+  var q  = document.getElementById('t2s').value.trim();
+  var ag = document.getElementById('t2ag').value;
+  var u  = document.getElementById('t2u').value;
+  if(q)  params.set('q', q);
+  if(ag) params.set('ag', ag);
+  if(u)  params.set('usr', u);
+  if(_kpi && _kpi!='all') params.set('kpi', _kpi);
+  var newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+  history.replaceState(null, '', newUrl);
+}
+</script>
+{% endblock %}

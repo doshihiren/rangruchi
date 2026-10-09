@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+{% block title %}Follow-ups{% endblock %}
+{% block content %}
+<div class="p-4 md:p-6 max-w-screen-xl mx-auto">
+  <div class="mb-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl md:text-2xl font-extrabold text-slate-900" style="font-family:'Space Grotesk',sans-serif;">Recovery CRM</h1>
+      <p class="text-slate-500 text-sm mt-1">Today · Overdue · Upcoming follow-ups</p>
+    </div>
+    <button onclick="document.getElementById('fu-add-modal').classList.remove('hidden')"
+      class="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-sm transition">
+      <i class="ti ti-plus text-base"></i> <span class="hidden md:inline">Add Follow-up</span>
+    </button>
+  </div>
+
+  <!-- Tiles -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+    {% for lbl,cnt,bg,href in [('Today',counts.today,'#854f0b','today'),('Overdue',counts.overdue,'#a32d2d','overdue')] %}
+    <a href="/followups?tab={{ href }}" class="tile block rounded-xl p-4 text-white relative overflow-hidden" style="background:{{ bg }};">
+      <div class="text-xs font-bold uppercase tracking-widest opacity-75 mb-1">{{ lbl }}</div>
+      <div class="text-3xl font-extrabold leading-none" style="font-family:'Space Grotesk',sans-serif;">{{ cnt }}</div>
+    </a>
+    {% endfor %}
+  </div>
+
+  <!-- Search -->
+  <div class="mb-3">
+    <form method="GET" class="flex gap-2">
+      <input type="hidden" name="tab" value="{{ tab }}">
+      <input type="hidden" name="aging" value="{{ aging or '' }}">
+      <input id="fu-search" name="q" value="{{ search or '' }}"
+        placeholder="🔍 Search party name..."
+        class="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+      <button type="submit" class="bg-blue-600 text-white font-bold px-4 py-2 rounded-lg text-sm">Search</button>
+      {% if search %}<a href="/followups?tab={{ tab }}" class="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50">✕ Clear</a>{% endif %}
+    </form>
+  </div>
+
+  <!-- Tabs -->
+  <div class="flex gap-1 bg-slate-100 p-1 rounded-xl mb-4 overflow-x-auto w-fit">
+    {% for tid,tl in [('today','📅 Today'),('overdue','🔴 Overdue')] %}
+    <a href="/followups?tab={{ tid }}" class="px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition {{ 'bg-white text-slate-800 shadow-sm' if tab==tid else 'text-slate-500 hover:text-slate-700' }}">
+      {{ tl }} <span class="opacity-60 text-xs">{{ counts[tid] }}</span>
+    </a>
+    {% endfor %}
+  </div>
+
+  {% if aging %}
+  <div class="mb-3">
+    <span class="badge bg-purple-100 text-purple-700">
+      Aging: {{ '0-60 days (Accounts Team)' if aging=='0-60' else '61-120 days (Sr. Accountant)' if aging=='61-120' else '120+ days (Owner)' }}
+    </span>
+    <a href="/followups?tab={{ tab }}" class="text-slate-400 hover:text-slate-600 text-xs ml-1">✕ Clear</a>
+  </div>
+  {% endif %}
+  {% if assigned or period %}
+  <div class="mb-3">
+    {% if assigned %}<span class="badge bg-indigo-100 text-indigo-700">👤 {{ assigned }}</span>{% endif %}
+    {% if period %}<span class="badge bg-teal-100 text-teal-700 ml-1">📅 {{ 'Today' if period=='today' else 'Last 7 days' if period=='d7' else 'Last 30 days' }}</span>{% endif %}
+    <a href="/followups?tab={{ tab }}" class="text-slate-400 hover:text-slate-600 text-xs ml-1">✕ Clear</a>
+  </div>
+  {% endif %}
+
+  {% set rows = overdue if tab=='overdue' else today_fu %}
+
+  {% if not rows %}
+  {% if tab == 'nocall' %}
+  <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-500 text-xs mb-3">
+    📵 These parties are assigned to you but have <strong>no followup call recorded yet</strong>. Add a follow-up from the ledger page.
+  </div>
+  {% endif %}
+  <div class="bg-green-50 border border-green-200 rounded-xl p-8 text-center text-green-700 font-bold">✅ All clear!</div>
+  {% else %}
+
+  <!-- Store data for JS popup -->
+  <script>
+  const _FU_ROWS = {{ rows|tojson }};
+  </script>
+
+  <div class="text-sm text-slate-500 mb-2">
+    Showing <strong class="text-slate-800">{{ rows|length }}</strong> follow-up(s)
+    {% if aging %}· filtered by aging bucket{% endif %}
+  </div>
+  <div class="space-y-0 bg-white rounded-xl border border-slate-200 overflow-hidden max-h-[1680px] overflow-y-auto">
+    {% for f in rows %}
+    <div class="px-4 py-4 border-b border-slate-50 last:border-0 cursor-pointer hover:bg-slate-50"
+         onclick="openFuPopup({{ loop.index0 }})">
+      <div class="flex items-start gap-3">
+        <div class="w-2.5 h-2.5 rounded-full flex-shrink-0 mt-1.5 {% if f.priority=='High' %}bg-red-500{% elif f.priority=='Medium' %}bg-amber-500{% else %}bg-green-500{% endif %}"></div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-start justify-between gap-2 flex-wrap">
+            <div>
+              <!-- Party name with mobile -->
+              <div class="font-bold text-slate-800 text-sm">
+                {{ f.party_name }}
+                {% if f.party_mobile and f.party_mobile|string|length >= 10 %}
+                <span class="text-slate-400 font-normal text-xs ml-1">📱 {{ f.party_mobile[-10:] }}</span>
+                {% endif %}
+              </div>
+              <div class="text-slate-400 text-xs mt-0.5">
+                {% if f.agent_name %}{{ f.agent_name }}{% endif %}
+                {% if f.agency_name %} · {{ f.agency_name }}{% endif %}
+                {% if f.seller_name %} · {{ f.seller_name }}{% endif %}
+                {% if f.party_state %} · {{ f.party_state }}{% endif %}
+              </div>
+              <div class="text-xs mt-0.5 font-semibold text-red-700">
+                ₹{{ "{:,.0f}".format(f.outstanding or 0) }} outstanding
+                · Due: {{ f.next_followup_date }}
+              </div>
+              {% if f.notes %}
+              <div class="text-xs text-slate-500 italic mt-0.5">{{ f.notes[:60] }}</div>
+              {% endif %}
+            </div>
+            <div class="flex items-center gap-1.5 flex-wrap flex-shrink-0">
+              {% if f.priority=='High' %}<span class="badge bg-red-100 text-red-700">High</span>
+              {% elif f.priority=='Medium' %}<span class="badge bg-amber-100 text-amber-700">Med</span>
+              {% else %}<span class="badge bg-green-100 text-green-700">Low</span>{% endif %}
+              <span class="badge bg-slate-100 text-slate-600">{{ f.status }}</span>
+              <span class="text-xs text-blue-600 font-semibold">Tap to update →</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- Update Follow-up Popup -->
+<div id="fu-popup" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-screen overflow-y-auto">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white z-10">
+      <div>
+        <h3 class="font-bold text-slate-800 text-base" id="popup-title" style="font-family:'Space Grotesk',sans-serif;">Follow-up</h3>
+        <div class="text-xs text-slate-400 mt-0.5" id="popup-meta"></div>
+      </div>
+      <button onclick="closeFuPopup()" class="text-slate-400 hover:text-slate-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-xl">✕</button>
+    </div>
+    <div class="p-5">
+      <!-- Party info -->
+      <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div><div class="text-xs font-bold text-slate-400 uppercase" style="font-size:9px;">Outstanding</div><div class="font-extrabold text-red-700 text-sm mt-0.5" id="popup-outstanding">—</div></div>
+        <div><div class="text-xs font-bold text-slate-400 uppercase" style="font-size:9px;">Mobile</div><div class="font-semibold text-slate-700 text-sm mt-0.5" id="popup-mobile">—</div></div>
+        <div><div class="text-xs font-bold text-slate-400 uppercase" style="font-size:9px;">Agent</div><div class="font-semibold text-slate-700 text-sm mt-0.5" id="popup-agent">—</div></div>
+        <div><div class="text-xs font-bold text-slate-400 uppercase" style="font-size:9px;">Agency</div><div class="font-semibold text-slate-700 text-sm mt-0.5" id="popup-agency">—</div></div>
+      </div>
+
+      <!-- Past history -->
+      <div class="mb-4">
+        <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Past Communication</div>
+        <div id="popup-history" class="space-y-2 max-h-36 overflow-y-auto"></div>
+      </div>
+
+      <!-- Update form -->
+      <div class="bg-blue-50 border border-blue-200 rounded-xl p-4">
+        <div class="text-xs font-bold text-blue-700 uppercase tracking-widest mb-3">Update Follow-up</div>
+        <form method="POST" action="/followups/update" class="space-y-3">
+          <input type="hidden" name="id" id="popup-fu-id">
+          <input type="hidden" name="tab" value="{{ tab }}">
+          <input type="hidden" name="aging" value="{{ aging or '' }}">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-bold text-slate-500 block mb-1">New Status</label>
+              <select name="status" id="popup-status" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
+                <option>Pending</option><option>Followup Done</option>
+                <option>Promise To Pay</option><option>Paid</option>
+                <option>Dispute</option><option>Escalated</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-bold text-slate-500 block mb-1">Next Follow-up</label>
+              <input type="date" name="next_date" id="popup-next-date" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
+            </div>
+            <div class="col-span-2">
+              <label class="text-xs font-bold text-slate-500 block mb-1">Remarks / Notes</label>
+              <textarea name="notes" id="popup-notes" rows="2" placeholder="Call outcome, party response, next action..."
+                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white resize-none"></textarea>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-sm transition">💾 Update</button>
+            <a id="popup-ledger-link" href="#" class="flex items-center gap-1.5 px-4 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50 font-semibold transition">
+              <i class="ti ti-book text-sm"></i> Ledger
+            </a>
+            {% if True %}
+            <a id="popup-wa-link" href="#" target="_blank" class="flex items-center gap-1.5 px-4 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700 hover:bg-green-100 font-semibold transition">
+              <i class="ti ti-brand-whatsapp text-sm"></i> WA
+            </a>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Follow-up Modal -->
+<div id="fu-add-modal" class="hidden fixed inset-0 z-50 flex items-end md:items-center justify-center p-4 bg-black/40">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-screen overflow-y-auto">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
+      <h3 class="font-bold text-slate-800 text-base" style="font-family:'Space Grotesk',sans-serif;">Add Follow-up</h3>
+      <button onclick="document.getElementById('fu-add-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-lg">✕</button>
+    </div>
+    <form method="POST" action="/followups/add" class="p-5 space-y-4">
+      <div>
+        <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Party</label>
+        <select name="party_name" id="party_select" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500">
+          {% for t in tickets %}<option value="{{ t.party_name }}" data-id="{{ t.id }}" data-bill="{{ t.bill_no }}">{{ t.party_name }} — ₹{{ "{:,.0f}".format(t.pending_amount) }}</option>{% endfor %}
+        </select>
+        <input type="hidden" name="ticket_id" id="f_ticket_id">
+        <input type="hidden" name="bill_no" id="f_bill_no">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Status</label>
+          <select name="status" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+            {% for s in ['Pending','Followup Done','Promise To Pay','Paid','Dispute','Escalated'] %}<option>{{ s }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Priority</label>
+          <select name="priority" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+            <option>High</option><option selected>Medium</option><option>Low</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Next Follow-up</label>
+          <input type="date" name="next_followup_date" id="crm-next-date" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Last Call (auto)</label>
+          <div class="border border-slate-100 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500 font-semibold" id="lcd-display">Today</div>
+        </div>
+        <div class="col-span-2">
+          <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Notes</label>
+          <textarea name="notes" rows="3" placeholder="Call notes, party response, next action..." class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none"></textarea>
+        </div>
+      </div>
+      <div class="flex gap-3 pt-1">
+        <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl text-sm transition">💾 Save Follow-up</button>
+        <button type="button" onclick="document.getElementById('fu-add-modal').classList.add('hidden')" class="px-5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50 transition">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const FU_DATA = typeof _FU_ROWS !== 'undefined' ? _FU_ROWS : [];
+
+function openFuPopup(idx) {
+  const d = FU_DATA[idx];
+  if (!d) return;
+  document.getElementById('fu-popup').classList.remove('hidden');
+  document.getElementById('popup-title').textContent = d.party_name;
+  // Format date nicely
+  let dueStr = d.next_followup_date || '—';
+  if (dueStr && dueStr.length > 10) {
+    const dt = new Date(dueStr);
+    dueStr = dt.toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'});
+  }
+  document.getElementById('popup-meta').textContent = 'Due: ' + dueStr + ' · ' + (d.status||'');
+  document.getElementById('popup-outstanding').textContent =
+    d.outstanding ? '₹' + Number(d.outstanding).toLocaleString('en-IN') : '—';
+  const mob = d.party_mobile && String(d.party_mobile).length >= 10
+    ? String(d.party_mobile).slice(-10) : '—';
+  document.getElementById('popup-mobile').textContent = mob;
+  document.getElementById('popup-agent').textContent = d.agent_name || '—';
+  document.getElementById('popup-agency').textContent = d.agency_name || '—';
+  document.getElementById('popup-fu-id').value = d.id;
+  document.getElementById('popup-ledger-link').href = '/ledger?party=' + encodeURIComponent(d.party_name);
+
+  // WhatsApp link
+  const waLink = document.getElementById('popup-wa-link');
+  if (mob !== '—') {
+    waLink.href = 'https://wa.me/91' + mob + '?text=Dear ' + d.party_name + ', outstanding Rs.' + Math.round(d.outstanding||0) + '. Kindly arrange payment.';
+    waLink.style.display = '';
+  } else {
+    waLink.style.display = 'none';
+  }
+
+  // Set today as default next follow-up
+  document.getElementById('popup-next-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('popup-notes').value = '';
+
+  // Set current status
+  const sel = document.getElementById('popup-status');
+  for (let i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === d.status) { sel.selectedIndex = i; break; }
+  }
+
+  // Past history
+  const hist = d.history || [];
+  const histEl = document.getElementById('popup-history');
+  if (!hist.length) {
+    histEl.innerHTML = '<div class="text-xs text-slate-400 italic">No previous communication.</div>';
+  } else {
+    histEl.innerHTML = hist.map(h => `
+      <div class="bg-white border border-slate-200 rounded-lg px-3 py-2">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs font-bold text-slate-600">${h.last_call_date||'—'}</span>
+          <span class="badge bg-slate-100 text-slate-600" style="font-size:10px;padding:2px 7px;">${h.status||'—'}</span>
+        </div>
+        <div class="text-xs text-slate-500">${h.notes||'No notes'}</div>
+        <div class="text-xs text-slate-400 mt-0.5">By: ${h.assigned_to||'—'}</div>
+      </div>`).join('');
+  }
+}
+
+function closeFuPopup() {
+  document.getElementById('fu-popup').classList.add('hidden');
+}
+
+document.getElementById('fu-popup').addEventListener('click', function(e) {
+  if (e.target === this) closeFuPopup();
+});
+
+// Set today in add modal
+const today = new Date().toISOString().split('T')[0];
+const nfd = document.getElementById('crm-next-date');
+if (nfd) nfd.value = today;
+const lcd = document.getElementById('lcd-display');
+if (lcd) lcd.textContent = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+
+document.getElementById('party_select')?.addEventListener('change', function(){
+  const o = this.options[this.selectedIndex];
+  document.getElementById('f_ticket_id').value = o.dataset.id||'';
+  document.getElementById('f_bill_no').value = o.dataset.bill||'';
+});
+</script>
+{% endblock %}

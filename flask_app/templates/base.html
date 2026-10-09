@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>RecoveryOS — {% block title %}Dashboard{% endblock %}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.0/dist/cdn.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+  theme: { extend: {
+    fontFamily: { sans:['Inter','sans-serif'], display:['Space Grotesk','sans-serif'] },
+    colors: { brand: { blue:'#185fa5',red:'#a32d2d',amber:'#854f0b',teal:'#0f6e56',purple:'#534ab7',coral:'#993c1d',green:'#3b6d11',pink:'#993556',gray:'#5f5e5a' } }
+  }}
+}
+</script>
+<style>
+body{font-family:'Inter',sans-serif;background:#f1f5f9;}
+.tile{transition:transform 0.15s,box-shadow 0.15s;}
+.tile:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,0.15);}
+.nav-item{transition:all 0.15s;}
+.nav-item.active,.nav-item:hover{background:rgba(255,255,255,0.1);}
+.badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:3px;letter-spacing:0.03em;}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:2px;}
+.flash-success{background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;}
+.flash-error{background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;}
+/* Mobile sidebar overlay */
+#sidebar-overlay{display:none;}
+@media(max-width:768px){
+  #sidebar{transform:translateX(-100%);transition:transform 0.25s;position:fixed;z-index:50;}
+  #sidebar.open{transform:translateX(0);}
+  #sidebar-overlay{display:block;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:40;display:none;}
+  #sidebar-overlay.open{display:block;}
+  main{margin-left:0!important;}
+  .hide-mobile{display:none!important;}
+}
+</style>
+</head>
+<body class="min-h-screen" x-data="{sidebarOpen:false}">
+
+<!-- Flash messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full px-4">
+  {% for cat,msg in messages %}
+  <div class="flash-{{ cat }} rounded-lg px-4 py-3 text-sm font-semibold shadow-lg flex items-center gap-2" x-data="{show:true}" x-show="show" x-init="setTimeout(()=>show=false,4000)">
+    <i class="ti ti-{{ 'check' if cat=='success' else 'alert-circle' }} text-base"></i>{{ msg }}
+    <button class="ml-auto" @click="show=false"><i class="ti ti-x text-sm"></i></button>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+
+<!-- Mobile overlay -->
+<div id="sidebar-overlay" :class="sidebarOpen?'open':''" @click="sidebarOpen=false"></div>
+
+<!-- Sidebar -->
+<aside id="sidebar" class="w-52 min-h-screen bg-slate-900 flex flex-col fixed left-0 top-0 bottom-0 z-50 md:transform-none md:translate-x-0" :class="sidebarOpen?'open':''">
+  <div class="px-4 pt-5 pb-4 border-b border-white/10">
+    <div class="flex items-center gap-2.5 mb-4">
+      <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-base flex-shrink-0">⚡</div>
+      <div>
+        <div class="font-display font-bold text-white text-sm">RecoveryOS</div>
+        <div class="text-slate-500 text-xs">Tally ERP</div>
+      </div>
+    </div>
+    <div class="bg-white/5 border-l-2 border-blue-500 pl-3 pr-2 py-2 rounded-r-lg">
+      <div class="text-slate-400 text-xs mb-0.5">Signed in as</div>
+      <div class="text-white font-bold text-sm leading-tight">{{ session.username }}</div>
+      <div class="text-blue-400 text-xs font-medium mt-0.5">
+        {% if session.role=='Owner' %}👑{% elif session.role=='Admin' %}🛡{% elif session.role=='Agent' %}👤{% elif session.role=='Agency' %}🏢{% else %}💼{% endif %}
+        {{ session.role }}
+      </div>
+    </div>
+  </div>
+
+  <nav class="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
+    {% set role = session.role %}
+    {% if role in ['Owner','Admin'] %}
+      {% set items = [('/dashboard','ti-layout-dashboard','Home'),('/tickets','ti-ticket','Tickets'),('/followups','ti-phone-call','Follow-ups'),('/ledger','ti-book','Ledger'),('/pdc','ti-credit-card','PDC Cheques'),('/analytics','ti-chart-bar','Analytics'),('/admin','ti-settings','Admin')] %}
+    {% elif role == 'Agent' %}
+      {% set items = [('/dashboard','ti-layout-dashboard','Home'),('/tickets','ti-ticket','My Tickets'),('/followups','ti-phone-call','Follow-ups'),('/ledger','ti-book','Ledger'),('/pdc','ti-credit-card','PDC Cheques')] %}
+    {% elif role == 'Agency' %}
+      {% set items = [('/dashboard','ti-layout-dashboard','Home'),('/tickets','ti-ticket','Agency Tickets'),('/followups','ti-phone-call','Follow-ups'),('/ledger','ti-book','Ledger'),('/pdc','ti-credit-card','PDC Cheques')] %}
+    {% else %}
+      {% set items = [('/dashboard','ti-layout-dashboard','Home'),('/tickets','ti-ticket','Tickets'),('/followups','ti-phone-call','Follow-ups'),('/ledger','ti-book','Ledger'),('/pdc','ti-credit-card','PDC Cheques')] %}
+    {% endif %}
+    {% for href,icon,label in items %}
+    <a href="{{ href }}" @click="sidebarOpen=false" class="nav-item {{ 'active' if request.path==href else '' }} flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-slate-400 hover:text-white text-sm font-medium">
+      <i class="ti {{ icon }} text-base w-5 text-center"></i>{{ label }}
+    </a>
+    {% endfor %}
+  </nav>
+
+  <div class="px-3 pb-4 pt-3 border-t border-white/10 space-y-1.5">
+    {% if session.username == 'CHIRAG' %}
+    <form action="/admin/sync" method="POST" onsubmit="document.getElementById('nav-sync-btn').disabled=true; document.getElementById('nav-sync-text').innerText='Syncing... (1-2 min)'; document.getElementById('nav-sync-spinner').classList.remove('hidden'); document.getElementById('nav-sync-icon').classList.add('hidden');">
+      <button id="nav-sync-btn" class="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs font-bold py-2.5 rounded-lg transition">
+        <svg id="nav-sync-spinner" class="hidden animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <i id="nav-sync-icon" class="ti ti-refresh text-sm"></i>
+        <span id="nav-sync-text">Sync Tally</span>
+      </button>
+    </form>
+    <form method="POST" action="/admin/sync-pdc" onsubmit="startSyncOverlay('Importing PDC from XML...')" style="width:100%;margin-top:6px;">
+      <button type="submit" class="w-full flex items-center justify-center gap-2 text-xs font-bold py-2.5 rounded-lg transition" style="background:#16a34a;color:#fff;">
+        <i class="ti ti-file-import text-sm"></i>
+        <span>PDC Sync</span>
+      </button>
+    </form>
+    {% endif %}
+    <a href="/logout" class="w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white text-xs font-bold py-2.5 rounded-lg transition">
+      <i class="ti ti-logout text-sm"></i> Sign Out
+    </a>
+  </div>
+</aside>
+
+<!-- Top bar for mobile -->
+<div class="md:hidden fixed top-0 left-0 right-0 z-40 bg-slate-900 px-4 py-3 flex items-center justify-between border-b border-white/10">
+  <button @click="sidebarOpen=!sidebarOpen" class="text-white p-1">
+    <i class="ti ti-menu-2 text-xl"></i>
+  </button>
+  <div class="text-white font-display font-bold text-sm">⚡ RecoveryOS</div>
+  <div class="text-slate-400 text-xs">{{ session.role }}</div>
+</div>
+
+<!-- Main content -->
+<main class="md:ml-52 min-h-screen pt-14 md:pt-0">
+  {% if request.path not in ['/dashboard','/login','/'] %}
+  <div class="px-4 md:px-6 pt-3">
+    <button onclick="history.back()" class="inline-flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-1.5 hover:bg-slate-50 transition">
+      <i class="ti ti-arrow-left text-sm"></i> Back
+    </button>
+  </div>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+
+
+<!-- Fullscreen Sync Overlay -->
+<div id="sync-overlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.85);z-index:99999;align-items:center;justify-content:center;flex-direction:column;">
+  <div style="background:#fff;border-radius:20px;padding:48px 64px;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,0.4);min-width:300px;">
+    <div style="width:60px;height:60px;border:6px solid #e2e8f0;border-top-color:#2563eb;border-radius:50%;animation:ovSpin 0.8s linear infinite;margin:0 auto 20px;"></div>
+    <div id="overlay-status" style="font-size:20px;font-weight:800;color:#1e293b;margin-bottom:8px;">Syncing...</div>
+    <div style="font-size:13px;color:#94a3b8;margin-top:4px;">Please wait · Do not close this window</div>
+  </div>
+</div>
+<style>@keyframes ovSpin{to{transform:rotate(360deg)}}</style>
+
+<script>
+function startSyncOverlay(msg){
+  var ov=document.getElementById('sync-overlay');
+  if(ov){ov.style.display='flex';}
+  var st=document.getElementById('overlay-status');
+  if(st) st.innerText=msg||'Syncing...';
+  setTimeout(pollOverlay,2000);
+  return true;
+}
+function pollOverlay(){
+  fetch('/admin/sync-status',{credentials:'same-origin'})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var st=document.getElementById('overlay-status');
+      if(st&&d.status) st.innerText=d.status;
+      if(!d.running){
+        var ov=document.getElementById('sync-overlay');
+        if(ov) ov.style.display='none';
+        if(d.result){
+          var p=document.createElement('div');
+          p.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#dcfce7;border:2px solid #16a34a;color:#14532d;padding:16px 32px;border-radius:12px;font-weight:700;z-index:99999;font-size:14px;box-shadow:0 8px 32px rgba(0,0,0,0.2);max-width:90vw;text-align:center;';
+          p.innerText='✅ '+d.result;
+          document.body.appendChild(p);
+          setTimeout(function(){p.remove();location.reload();},5000);
+        } else { location.reload(); }
+      } else { setTimeout(pollOverlay,2000); }
+    }).catch(function(){setTimeout(pollOverlay,3000);});
+}
+window.addEventListener('DOMContentLoaded',function(){
+  fetch('/admin/sync-status',{credentials:'same-origin'})
+    .then(function(r){return r.json();})
+    .then(function(d){if(d.running) startSyncOverlay(d.status||'Syncing...');})
+    .catch(function(){});
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Invoices{% endblock %}
+{% block content %}
+<div class="p-4 md:p-6 max-w-screen-xl mx-auto">
+
+  <!-- Header -->
+  <div class="mb-4 flex items-start justify-between flex-wrap gap-3">
+    <div>
+      <h1 class="text-xl md:text-2xl font-extrabold text-slate-900" style="font-family:'Space Grotesk',sans-serif;">Invoice View</h1>
+      {% if aging %}
+      <div class="inline-flex items-center gap-2 mt-1 px-3 py-1 rounded-full text-white text-xs font-bold" style="background:{{ age_color }};">
+        {{ age_label }}
+      </div>
+      {% else %}
+      <p class="text-slate-500 text-sm mt-1">All pending invoices — bill-wise view</p>
+      {% endif %}
+    </div>
+    <a href="/tickets" class="text-slate-500 text-sm hover:text-slate-700 font-semibold flex items-center gap-1">
+      ← Party View
+    </a>
+  </div>
+
+  <!-- KPI Strip -->
+  <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3" style="border-left:3px solid {{ age_color }};">
+      <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Total Invoices</div>
+      <div class="text-xl font-extrabold" style="font-family:'Space Grotesk',sans-serif;color:{{ age_color }};">{{ invoices|length }}</div>
+    </div>
+    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3" style="border-left:3px solid #a32d2d;">
+      <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Total Pending</div>
+      <div class="text-xl font-extrabold text-red-700" style="font-family:'Space Grotesk',sans-serif;">₹{{ "{:,.0f}".format(total) }}</div>
+    </div>
+    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3" style="border-left:3px solid #534ab7;">
+      <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Unique Parties</div>
+      <div class="text-xl font-extrabold text-purple-700" style="font-family:'Space Grotesk',sans-serif;">{{ parties }}</div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <form method="GET" class="bg-white rounded-xl border border-slate-200 p-4 mb-4 flex flex-wrap gap-3 items-end">
+    <input type="hidden" name="aging" value="{{ aging }}">
+    <div class="flex-1 min-w-40">
+      <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">Search Party</label>
+      <input name="q" value="{{ search }}" placeholder="Party name..." class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+    </div>
+    <div class="w-40">
+      <label class="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">State</label>
+      <select name="state" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+        <option value="All">All States</option>
+        {% for s in states %}<option value="{{ s }}" {{ 'selected' if state==s }}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2 rounded-lg text-sm transition">Apply</button>
+    <a href="/invoices?aging={{ aging }}" class="text-slate-500 font-bold text-sm px-4 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition">↺ Reset</a>
+  </form>
+
+  <!-- Aging tabs -->
+  <div class="flex gap-1 bg-slate-100 p-1 rounded-xl mb-4 w-fit overflow-x-auto">
+    {% for tab_aging, tab_label in [('','All'),('0-60','Accounts Team'),('61-120','Sr. Accountant'),('120%2B','Owner')] %}
+    <a href="/invoices?aging={{ tab_aging }}"
+       class="px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition {{ 'bg-white text-slate-800 shadow-sm' if aging==tab_aging else 'text-slate-500 hover:text-slate-700' }}">
+      {{ tab_label }}
+      {% if tab_aging == aging %}<span class="ml-1 opacity-60">{{ invoices|length }}</span>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+
+  <div class="text-sm text-slate-500 mb-3">
+    Showing <strong class="text-slate-800">{{ invoices|length }}</strong> invoices ·
+    Total: <strong class="text-red-600">₹{{ "{:,.0f}".format(total) }}</strong>
+  </div>
+
+  <!-- Desktop Table -->
+  <div class="bg-white rounded-xl border border-slate-200 overflow-hidden hidden md:block">
+    <div class="grid bg-slate-50 border-b-2 border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-400 uppercase tracking-widest"
+         style="grid-template-columns:2.5fr 90px 100px 70px 1fr 1fr 110px;">
+      <div>Party</div><div>Date</div><div>Invoice No</div><div>Days</div>
+      <div>Agent</div><div>Agency</div><div class="text-right">Pending</div>
+    </div>
+    {% set av = ['dbeafe|1e40af','fef3c7|92400e','ede9fe|5b21b6','d1fae5|065f46','fee2e2|991b1b','fce7f3|9d174d','e0f2fe|0c4a6e','ecfdf5|064e3b'] %}
+    {% for inv in invoices[:200] %}
+    {% set ac = av[loop.index0 % av|length].split('|') %}
+    {% set days = inv.days_overdue or 0 %}
+    <div class="grid items-center px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50"
+         style="grid-template-columns:2.5fr 90px 100px 70px 1fr 1fr 110px;">
+      <div>
+        <a href="/ledger?party={{ inv.party_name|urlencode }}" class="font-semibold text-blue-700 hover:underline text-sm">{{ inv.party_name }}</a>
+        {% if inv.party_mobile and inv.party_mobile|string|length >= 10 %}
+        <span class="text-slate-400 text-xs ml-1">📱 {{ inv.party_mobile[-10:] }}</span>
+        {% endif %}
+      </div>
+      <div class="text-slate-600 text-sm">{{ inv.invoice_date }}</div>
+      <div class="text-slate-500 text-sm font-mono">{{ inv.invoice_no or '—' }}</div>
+      <div>
+        {% if days > 120 %}<span class="badge bg-red-100 text-red-700">{{ days }}d</span>
+        {% elif days > 60 %}<span class="badge bg-amber-100 text-amber-700">{{ days }}d</span>
+        {% elif days > 0 %}<span class="badge bg-blue-100 text-blue-700">{{ days }}d</span>
+        {% else %}<span class="badge bg-green-100 text-green-700">Current</span>{% endif %}
+      </div>
+      <div class="text-slate-600 text-sm truncate">{{ inv.agent_name or '—' }}</div>
+      <div class="text-slate-600 text-sm truncate">{{ inv.agency_name or 'Direct' }}</div>
+      <div class="text-right font-bold text-slate-900 text-sm" style="font-family:'Space Grotesk',sans-serif;">
+        ₹{{ "{:,.0f}".format(inv.pending_amount) }}
+      </div>
+    </div>
+    {% else %}
+    <div class="px-4 py-10 text-center text-slate-400">No invoices found.</div>
+    {% endfor %}
+    {% if invoices|length > 200 %}
+    <div class="px-4 py-3 bg-slate-50 border-t text-center text-slate-500 text-xs">Showing top 200 of {{ invoices|length }}</div>
+    {% endif %}
+  </div>
+
+  <!-- Mobile Cards -->
+  <div class="md:hidden space-y-3">
+    {% for inv in invoices[:50] %}
+    {% set days = inv.days_overdue or 0 %}
+    <div class="bg-white rounded-xl border border-slate-200 p-4">
+      <div class="flex items-start justify-between mb-2">
+        <div>
+          <a href="/ledger?party={{ inv.party_name|urlencode }}" class="font-bold text-blue-700 text-sm hover:underline">{{ inv.party_name }}</a>
+          <div class="text-xs text-slate-400 mt-0.5">{{ inv.invoice_date }} · {{ inv.invoice_no or '—' }}</div>
+        </div>
+        <div class="text-right">
+          <div class="font-extrabold text-slate-900 text-sm">₹{{ "{:,.0f}".format(inv.pending_amount) }}</div>
+          {% if days > 120 %}<span class="badge bg-red-100 text-red-700">{{ days }}d</span>
+          {% elif days > 60 %}<span class="badge bg-amber-100 text-amber-700">{{ days }}d</span>
+          {% else %}<span class="badge bg-blue-100 text-blue-700">{{ days }}d</span>{% endif %}
+        </div>
+      </div>
+      <div class="text-xs text-slate-400">{{ inv.agent_name or '—' }} · {{ inv.agency_name or 'Direct' }} · {{ inv.party_state or '—' }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+</div>
+{% endblock %}
