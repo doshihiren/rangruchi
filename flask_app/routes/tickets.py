@@ -374,16 +374,16 @@ def tickets2():
     conn2 = get_conn()
     cur2  = conn2.cursor()
 
-    if role == "Owner":
+    if role.strip().lower() == "owner":
         cur2.execute(MAIN_SQL + " ORDER BY t.net_due DESC")
     else:
-        cur2.execute(MAIN_SQL + " AND t.assigned_to=%s ORDER BY t.net_due DESC", (un,))
+        cur2.execute(MAIN_SQL + " AND LOWER(TRIM(t.assigned_to))=LOWER(TRIM(%s)) ORDER BY t.net_due DESC", (un,))
 
     cols = [d[0] for d in cur2.description]
     rows_data = [dict(zip(cols, r)) for r in cur2.fetchall()]
 
     # User summary cards - Owner sees all, others see only own
-    if role == "Owner":
+    if role.strip().lower() == "owner":
         cur2.execute("""
             SELECT t.assigned_to, COUNT(*) cnt, SUM(t.net_due) amt
             FROM tickets t WHERE t.net_due > 0
@@ -397,7 +397,7 @@ def tickets2():
         cur2.execute("""
             SELECT t.assigned_to, COUNT(*) cnt, SUM(t.net_due) amt
             FROM tickets t WHERE t.net_due > 0
-            AND t.assigned_to = %s
+            AND LOWER(TRIM(t.assigned_to)) = LOWER(TRIM(%s))
             GROUP BY t.assigned_to
         """, (un,))
     user_cards = [{"name": r[0], "cnt": r[1], "amt": float(r[2] or 0)} for r in cur2.fetchall()]
