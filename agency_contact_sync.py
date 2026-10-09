@@ -69,7 +69,7 @@ def _live_collection(kind):
     resp.raise_for_status()
     # Preserve valid numeric XML entities. Strip only references to forbidden
     # XML 1.0 codepoints; escaping all entities corrupts legal text.
-    raw = resp.text.lstrip("\\ufeff")
+    raw = resp.text.lstrip(chr(0xFEFF))
     def valid_entity(match):
         value = match.group(1)
         try:
