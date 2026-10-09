@@ -181,16 +181,44 @@ def run_targeted_sync(kind):
                         AND COALESCE(TRIM(t.agency_name),'')=''
                         AND COALESCE(TRIM(p.agency_name),'')<>''""")
                     totals["ticket_updates"] += cur.rowcount
-                # Match complete agency names only; similar prefixes may belong to
-                # different people with different phone numbers.
-                phone_cols = [col for col in ("mobile", "agency_mobile") if col in agency_cols]
-                if phone_cols and "agency_name" in agency_cols:
-                    for name, phone in groups.values():
-                        for column in phone_cols:
-                            cur.execute(f"""UPDATE tally_agency_master SET {column}=%s
-                                WHERE UPPER(TRIM(agency_name))=%s
-                                AND COALESCE(TRIM({column}),'')=''""",
-                                (phone, name.strip().upper()))
+                # Insert missing agency-master rows only for exact normalized
+                # matches to names on active tickets. Never use fuzzy guesses.
+                if {"agency_name", "mobile"} <= agency_cols and {"agency_name"} <= tickets:
+                    cur.execute("""SELECT DISTINCT agency_name FROM tickets
+                        WHERE COALESCE(TRIM(agency_name),'')<>''""")
+                    used_names = [row[0] for row in cur.fetchall()]
+                    normalized_groups = {}
+                    collisions = set()
+                    for group_name, phone in groups.values():
+                        key = _normalize_party(group_name)
+                        if key in normalized_groups:
+                            collisions.add(key)
+                        normalized_groups[key] = phone
+                    for agency_name in used_names:
+                        key = _normalize_party(agency_name)
+                        if key in ("CASH", "SELF", "DIRECT") or key in collisions:
+                            continue
+                        phone = normalized_groups.get(key)
+                        if not phone:
+                            continue
+                        # Respect existing records even when casing differs.
+                        cur.execute("""SELECT id, mobile FROM tally_agency_master
+                            WHERE UPPER(TRIM(agency_name))=%s""", (key,))
+                        matched = cur.fetchall()
+                        if len(matched) > 1:
+                            continue
+                        if matched:
+                            if not matched[0][1] or not str(matched[0][1]).strip():
+                                cur.execute("""UPDATE tally_agency_master SET mobile=%s,
+                                    last_synced_at=NOW() WHERE id=%s
+                                    AND COALESCE(TRIM(mobile),'')=''""",
+                                    (phone, matched[0][0]))
+                                totals["agency_updates"] += cur.rowcount
+                        else:
+                            cur.execute("""INSERT INTO tally_agency_master
+                                (agency_name,mobile,last_synced_at)
+                                VALUES (%s,%s,NOW()) ON CONFLICT (agency_name) DO NOTHING""",
+                                (agency_name,phone))
                             totals["agency_updates"] += cur.rowcount
             else:
                 if {"party_name","mobile"} <= tpm:
