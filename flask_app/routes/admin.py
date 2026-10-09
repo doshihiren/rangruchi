@@ -156,6 +156,40 @@ def trigger_sync():
     flash("Sync started in background.", "info")
     return redirect(url_for("admin.admin"))
 
+# Isolated agency/contact refresh (does not run full Tally sync)
+@admin_bp.route("/admin/sync-<kind>", methods=["POST"])
+@login_required
+@sync_allowed
+def targeted_master_sync(kind):
+    if kind not in ("agency", "contact"):
+        from flask import abort
+        abort(404)
+    if not _sync_lock.acquire(blocking=False):
+        flash("Another sync is already running.", "warning")
+        return redirect(url_for("home.dashboard"))
+
+    def worker():
+        _sync_state.update({"running": True, "status": f"Syncing {kind} from Master.xml...", "result": ""})
+        try:
+            from agency_contact_sync import run_targeted_sync
+            result = run_targeted_sync(kind)
+            _sync_state["result"] = (f"{kind.title()} sync complete: "
+                f"{result['party_updates']} master parties, "
+                f"{result['ticket_updates']} tickets, "
+                f"{result['agency_updates']} agency numbers updated. "
+                "Previously filled values preserved.")
+            _sync_state["status"] = "done"
+        except Exception as exc:
+            _sync_state.update({"result": f"{kind.title()} sync failed: {exc}", "status": "error"})
+        finally:
+            _sync_state["running"] = False
+            _sync_lock.release()
+
+    _sync_state.update({"running": True, "status": f"Starting {kind} sync...", "result": ""})
+    _threading.Thread(target=worker, daemon=True).start()
+    flash(f"{kind.title()} sync started.", "info")
+    return redirect(url_for("home.dashboard"))
+
 # ── PDC Sync from pdc\pdc.xml (voucher format) ───────────────────────────────
 @admin_bp.route("/admin/sync-pdc", methods=["POST"])
 @login_required
