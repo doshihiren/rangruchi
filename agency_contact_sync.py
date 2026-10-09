@@ -80,7 +80,7 @@ def _live_collection(kind):
             return ""
     raw = re.sub(r"&#(x[0-9a-fA-F]+|[0-9]+);", valid_entity, raw)
     raw = raw.replace("UDF:", "UDF_")
-    raw = re.sub(r"[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]", "", raw)
+    raw = "".join(ch for ch in raw if ord(ch) in (9, 10, 13) or ord(ch) >= 32)
     try:
         root = ET.fromstring(raw)
     except ET.ParseError as exc:
