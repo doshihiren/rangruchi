@@ -91,7 +91,7 @@ def run_targeted_sync(kind):
                 agency = groups[parent.upper()][0]
         phone = _contact(block)
         if agency or phone:
-            parties[name.upper()] = (name, agency, phone)
+            parties[name.upper()] = (name, agency, phone, _udf(block, ("BEIBROKERNAMEUDF",)))
     conn = get_conn()
     totals = {"parties":len(parties), "groups":len(groups), "party_updates":0, "ticket_updates":0, "agency_updates":0}
     try:
@@ -101,12 +101,19 @@ def run_targeted_sync(kind):
             agency_cols = _columns(cur, "tally_agency_master")
             if kind == "agency":
                 if {"party_name","agency_name"} <= tpm:
-                    for name, agency, phone in parties.values():
+                    for name, agency, phone, agent in parties.values():
                         if agency:
                             cur.execute("""UPDATE tally_party_master SET agency_name=%s
                                 WHERE UPPER(TRIM(party_name))=%s
                                 AND COALESCE(TRIM(agency_name),'')=''""", (agency,name.upper()))
                             totals["party_updates"] += cur.rowcount
+                if {"party_name", "agent_name"} <= tickets:
+                    for name, agency, phone, agent in parties.values():
+                        if agent:
+                            cur.execute("""UPDATE tickets SET agent_name=%s
+                                WHERE UPPER(TRIM(party_name))=%s
+                                AND COALESCE(TRIM(agent_name),'')=''""", (agent, name.upper()))
+                            totals["ticket_updates"] += cur.rowcount
                 if {"party_name","agency_name"} <= tickets and {"party_name","agency_name"} <= tpm:
                     cur.execute("""UPDATE tickets t SET agency_name=p.agency_name FROM tally_party_master p
                         WHERE UPPER(TRIM(t.party_name))=UPPER(TRIM(p.party_name))
