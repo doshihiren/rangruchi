@@ -17,11 +17,11 @@ def admin_required(f):
     return decorated
 
 def sync_allowed(f):
-    """Allow Owner or CHIRAG to run syncs"""
+    """Only the CHIRAG account can use bottom-left sync tools."""
     from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
-        if session.get("role") != "Owner" and session.get("username") != "CHIRAG":
+        if session.get("username") != "CHIRAG":
             flash("Access denied.", "error")
             return redirect(url_for("home.dashboard"))
         return f(*args, **kwargs)
