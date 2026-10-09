@@ -192,7 +192,7 @@ def tickets():
         f"LEFT JOIN tally_party_master tpm ON tpm.party_name_norm=t.party_name_norm "
         f"LEFT JOIN salesperson_mapping sm_party ON sm_party.party_name=t.party_name "
         f"LEFT JOIN salesperson_mapping sm_agency ON UPPER(sm_agency.party_name)=UPPER(COALESCE(NULLIF(tpm.agency_name,''),t.agency_name)) "
-        f"LEFT JOIN LATERAL (SELECT mobile FROM tally_agency_master WHERE UPPER(agency_name) LIKE UPPER(COALESCE(NULLIF(t.agency_name,''),NULLIF(tpm.agency_name,''))) || '%%' AND mobile IS NOT NULL AND mobile != '' ORDER BY LENGTH(agency_name) ASC LIMIT 1) tam "
+        f"LEFT JOIN LATERAL (SELECT mobile FROM tally_agency_master WHERE UPPER(TRIM(agency_name)) = UPPER(TRIM(COALESCE(NULLIF(tpm.agency_name,''),NULLIF(t.agency_name,'')))) AND mobile IS NOT NULL AND mobile != '' LIMIT 1) tam "
         f"{extra_wh} "
         f"AND t.pending_amount > 0 ORDER BY "
         f"CASE WHEN t.bill_date ~ '^[0-9]{{2}}-[A-Za-z]{{3}}-[0-9]{{2}}$' "
@@ -349,7 +349,7 @@ def tickets2():
              = regexp_replace(UPPER(t.party_name),'\s+',' ','g')
         LEFT JOIN LATERAL (
             SELECT mobile FROM tally_agency_master
-            WHERE UPPER(agency_name) LIKE UPPER(COALESCE(NULLIF(t.agency_name,''),NULLIF(tpm.agency_name,''))) || '%%'
+            WHERE UPPER(TRIM(agency_name)) = UPPER(TRIM(COALESCE(NULLIF(tpm.agency_name,''),NULLIF(t.agency_name,''))))
             AND mobile IS NOT NULL AND mobile != '' ORDER BY LENGTH(agency_name) ASC LIMIT 1
         ) tam ON TRUE
         LEFT JOIN (
