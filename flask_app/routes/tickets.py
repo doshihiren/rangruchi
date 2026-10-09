@@ -333,7 +333,7 @@ def tickets2():
     role = session.get("role","")
     un   = session.get("username","")
 
-    MAIN_SQL = """
+    MAIN_SQL = r"""
         SELECT
             t.party_name, t.ticket_number, t.credit_days, t.net_due,
             t.assigned_to, t.party_mobile, t.assigned_on,
