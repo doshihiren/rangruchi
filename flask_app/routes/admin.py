@@ -286,22 +286,15 @@ def trigger_pdc_sync():
                     ON CONFLICT (voucher_number,party_name,cheque_date)
                     DO UPDATE SET amount=EXCLUDED.amount""", r)
 
-            # Recalculate net_due
-            _sync_state["status"] = "Recalculating net due..."
-            cur.execute("""
-                UPDATE tickets t SET net_due = GREATEST(0,
-                    COALESCE((SELECT SUM(b.pending_amount) FROM billwise b
-                        WHERE b.party_name=t.party_name AND b.pending_amount>0
-                        AND b.invoice_date ~ '^[0-9]{2}-[A-Za-z]{3}-[0-9]{2}$'
-                        AND TO_DATE(b.invoice_date,'DD-Mon-YY') <=
-                        CURRENT_DATE - MAKE_INTERVAL(days=>COALESCE(NULLIF(t.credit_days,'')::int,30))
-                    ),0)
-                    - COALESCE((SELECT SUM(p.amount) FROM pdc_entries p WHERE p.party_name=t.party_name),0)
-                )
-            """)
+            # Commit the replaced PDC records, then use the exact same
+            # overdue/PDC/on-account calculation as the full Tally sync.
             conn.commit()
             cur.close()
             release_conn(conn)
+            _sync_state["status"] = "Recalculating net due and reopening tickets..."
+            from sync_engine import recompute_net_due, apply_ticket_due_cycle
+            recompute_net_due()
+            apply_ticket_due_cycle()
 
             total = sum(r[3] for r in records)
             _sync_state["result"]  = f"PDC Import: {len(records)} entries | Rs {total:,.0f}"
