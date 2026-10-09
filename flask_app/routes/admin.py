@@ -180,7 +180,7 @@ def targeted_master_sync(kind):
         return redirect(url_for("home.dashboard"))
 
     def worker():
-        _sync_state.update({"running": True, "status": f"Syncing {kind} from Master.xml...", "result": ""})
+        _sync_state.update({"running": True, "status": f"Syncing {kind} from live Tally...", "result": ""})
         try:
             from agency_contact_sync import run_targeted_sync
             result = run_targeted_sync(kind)
@@ -188,7 +188,7 @@ def targeted_master_sync(kind):
                 f"{result['party_updates']} master parties, "
                 f"{result['ticket_updates']} tickets, "
                 f"{result['agency_updates']} agency numbers updated. "
-                "Previously filled values preserved.")
+                ("Existing nonblank agency details preserved." if kind == "agency" else "Party mobiles refreshed from current Tally data."))
             _sync_state["status"] = "done"
         except Exception as exc:
             _sync_state.update({"result": f"{kind.title()} sync failed: {exc}", "status": "error"})
