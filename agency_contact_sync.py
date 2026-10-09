@@ -1,5 +1,5 @@
 """Targeted, non-destructive agency/contact refresh from live TallyPrime.
-No full financial sync. Existing nonblank values are preserved.
+No full financial sync. Agency values are fill-only; Contact Sync refreshes verified changed mobiles.
 """
 import html
 import io
@@ -221,19 +221,40 @@ def run_targeted_sync(kind):
                                 (agency_name,phone))
                             totals["agency_updates"] += cur.rowcount
             else:
-                if {"party_name","mobile"} <= tpm:
-                    for name, agency, phone, agent in parties.values():
+                # Contact Sync is an authoritative refresh, not just a blank
+                # filler. Match unique live Tally ledgers exactly after the
+                # same harmless name normalization used for agency mapping.
+                # Never overwrite a stored number with a blank or guess.
+                by_name = {}
+                ambiguous = set()
+                for name, agency, phone, agent in parties.values():
+                    if not phone:
+                        continue
+                    key = _normalize_party(name)
+                    if key in by_name and by_name[key] != phone:
+                        ambiguous.add(key)
+                    else:
+                        by_name[key] = phone
+                for key in ambiguous:
+                    by_name.pop(key, None)
+                if {"party_name", "mobile"} <= tpm:
+                    cur.execute("SELECT DISTINCT party_name FROM tally_party_master")
+                    for (db_name,) in cur.fetchall():
+                        phone = by_name.get(_normalize_party(db_name))
                         if phone:
                             cur.execute("""UPDATE tally_party_master SET mobile=%s
-                                WHERE UPPER(TRIM(party_name))=%s AND COALESCE(TRIM(mobile),'')=''""",
-                                (phone,name.upper()))
+                                WHERE party_name=%s AND mobile IS DISTINCT FROM %s""",
+                                (phone, db_name, phone))
                             totals["party_updates"] += cur.rowcount
-                if {"party_name","party_mobile"} <= tickets and {"party_name","mobile"} <= tpm:
-                    cur.execute("""UPDATE tickets t SET party_mobile=p.mobile FROM tally_party_master p
-                        WHERE UPPER(TRIM(t.party_name))=UPPER(TRIM(p.party_name))
-                        AND COALESCE(TRIM(t.party_mobile),'')=''
-                        AND COALESCE(TRIM(p.mobile),'')<>''""")
-                    totals["ticket_updates"] += cur.rowcount
+                if {"party_name", "party_mobile"} <= tickets:
+                    cur.execute("SELECT DISTINCT party_name FROM tickets")
+                    for (db_name,) in cur.fetchall():
+                        phone = by_name.get(_normalize_party(db_name))
+                        if phone:
+                            cur.execute("""UPDATE tickets SET party_mobile=%s
+                                WHERE party_name=%s AND party_mobile IS DISTINCT FROM %s""",
+                                (phone, db_name, phone))
+                            totals["ticket_updates"] += cur.rowcount
         conn.commit()
         return totals
     except Exception:
