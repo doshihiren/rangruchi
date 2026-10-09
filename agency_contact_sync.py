@@ -68,6 +68,8 @@ def _live_collection(kind):
         headers={"Content-Type":"application/xml","Accept-Encoding":"identity"}, timeout=120)
     resp.raise_for_status()
     raw = re.sub(r'&#(?:x[0-9a-fA-F]+|[0-9]+);', '', resp.text)
+    raw = raw.replace("UDF:", "UDF_")
+    raw = re.sub(r"[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]", "", raw)
     root = ET.fromstring(raw)
     if root.findtext(".//STATUS") == "0":
         raise RuntimeError("Tally reported a failed export")
