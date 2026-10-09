@@ -8,7 +8,7 @@ home_bp = Blueprint("home", __name__)
 def get_fu_filter():
     un=session.get("username","")
     # Everyone including Owner sees only their own followups
-    return "WHERE (f.assigned_to=%s OR f.created_by=%s)",(un,un)
+    return "WHERE EXISTS (SELECT 1 FROM tickets owner_ticket WHERE owner_ticket.party_name=f.party_name AND owner_ticket.assigned_to=%s)",(un,)
 
 def fmt(n):
     n = abs(n or 0)
