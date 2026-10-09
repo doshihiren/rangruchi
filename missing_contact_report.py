@@ -1,7 +1,7 @@
 """Read-only diagnostics for missing agency names and contact numbers."""
 import html
 import re
-from agency_contact_sync import MASTER, _blocks, _tag, _udf, _phone, _contact
+from agency_contact_sync import _live_collection, _tag, _udf, _phone, _contact
 from db import query_df
 
 def _values(block):
@@ -34,12 +34,7 @@ def report(limit=250):
         r["status"] = "No matching XML ledger"
     if not indexed:
         return rows, "No unresolved tickets"
-    import os
-    if not os.path.isfile(MASTER):
-        return rows, "Master.xml not found on this computer"
-    for typ, name, block in _blocks(MASTER):
-        if typ != "LEDGER":
-            continue
+    for name, block in _live_collection("Ledger"):
         key = re.sub(r'\s+', ' ', name).strip().upper()
         key = re.sub(r'\s*\(RR\d+\)\s*$', '', key)
         row = indexed.get(key)
@@ -52,4 +47,4 @@ def report(limit=250):
         row["status"] = "Review candidates" if row["source_fields"] or any(
             row[k] for k in ("candidate_agency","candidate_agent","candidate_contact")
         ) else "No alternate fields found"
-    return rows, "Read-only report; candidate values require review"
+    return rows, "Read-only live Tally report; candidate values require review"
