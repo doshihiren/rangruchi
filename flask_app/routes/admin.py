@@ -45,6 +45,17 @@ def admin():
         agency_total=0, agency_with_mobile=0, agency_missing=[],
         credit_total=0, credit_with_period=0, credit_missing=[])
 
+@admin_bp.route("/admin/missing-contacts")
+@login_required
+@sync_allowed
+def missing_contacts():
+    from missing_contact_report import report
+    try:
+        rows, message = report()
+    except Exception as exc:
+        rows, message = [], f"Report unavailable: {exc}"
+    return render_template("missing_contacts.html", rows=rows, message=message)
+
 @admin_bp.route("/admin/add-user", methods=["POST"])
 @login_required
 @admin_required
