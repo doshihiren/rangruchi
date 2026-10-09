@@ -184,11 +184,16 @@ def targeted_master_sync(kind):
         try:
             from agency_contact_sync import run_targeted_sync
             result = run_targeted_sync(kind)
-            _sync_state["result"] = (f"{kind.title()} sync complete: "
+            suffix = ("Existing nonblank agency details preserved."
+                      if kind == "agency"
+                      else "Party mobiles refreshed from current Tally data.")
+            _sync_state["result"] = (
+                f"{kind.title()} sync complete: "
                 f"{result['party_updates']} master parties, "
                 f"{result['ticket_updates']} tickets, "
                 f"{result['agency_updates']} agency numbers updated. "
-                ("Existing nonblank agency details preserved." if kind == "agency" else "Party mobiles refreshed from current Tally data."))
+                + suffix
+            )
             _sync_state["status"] = "done"
         except Exception as exc:
             _sync_state.update({"result": f"{kind.title()} sync failed: {exc}", "status": "error"})
