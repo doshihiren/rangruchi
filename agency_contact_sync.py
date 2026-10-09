@@ -67,10 +67,24 @@ def _live_collection(kind):
     resp = requests.post(TALLY_URL, data=xml.encode("utf-8"),
         headers={"Content-Type":"application/xml","Accept-Encoding":"identity"}, timeout=120)
     resp.raise_for_status()
-    raw = re.sub(r'&#(?:x[0-9a-fA-F]+|[0-9]+);', '', resp.text)
+    # Preserve valid numeric XML entities. Strip only references to forbidden
+    # XML 1.0 codepoints; escaping all entities corrupts legal text.
+    raw = resp.text.lstrip("\\ufeff")
+    def valid_entity(match):
+        value = match.group(1)
+        try:
+            cp = int(value[1:], 16) if value.lower().startswith("x") else int(value)
+            valid = cp in (9, 10, 13) or 0x20 <= cp <= 0xD7FF or 0xE000 <= cp <= 0xFFFD or 0x10000 <= cp <= 0x10FFFF
+            return match.group(0) if valid else ""
+        except ValueError:
+            return ""
+    raw = re.sub(r"&#(x[0-9a-fA-F]+|[0-9]+);", valid_entity, raw)
     raw = raw.replace("UDF:", "UDF_")
     raw = re.sub(r"[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]", "", raw)
-    root = ET.fromstring(raw)
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        raise RuntimeError(f"Tally returned malformed XML ({exc}); no changes made") from exc
     if root.findtext(".//STATUS") == "0":
         raise RuntimeError("Tally reported a failed export")
     nodes = root.findall(".//" + kind.upper())
@@ -141,7 +155,7 @@ def run_targeted_sync(kind):
                         totals["agency_updates"] += cur.rowcount
             else:
                 if {"party_name","mobile"} <= tpm:
-                    for name, agency, phone in parties.values():
+                    for name, agency, phone, agent in parties.values():
                         if phone:
                             cur.execute("""UPDATE tally_party_master SET mobile=%s
                                 WHERE UPPER(TRIM(party_name))=%s AND COALESCE(TRIM(mobile),'')=''""",
