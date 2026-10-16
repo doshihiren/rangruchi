@@ -349,7 +349,7 @@ def tickets2():
              = regexp_replace(UPPER(t.party_name),'\s+',' ','g')
         LEFT JOIN LATERAL (
             SELECT mobile FROM tally_agency_master
-            WHERE UPPER(REGEXP_REPLACE(TRIM(agency_name), '\\s+', ' ', 'g')) = UPPER(REGEXP_REPLACE(TRIM(COALESCE(NULLIF(tpm.agency_name,''),NULLIF(t.agency_name,''))), '\\s+', ' ', 'g'))
+            WHERE UPPER(REGEXP_REPLACE(TRIM(agency_name), '\s+', ' ', 'g')) = UPPER(REGEXP_REPLACE(TRIM(COALESCE(NULLIF(tpm.agency_name,''),NULLIF(t.agency_name,''))), '\s+', ' ', 'g'))
             AND mobile IS NOT NULL AND mobile != '' ORDER BY LENGTH(agency_name) ASC LIMIT 1
         ) tam ON TRUE
         LEFT JOIN (
@@ -464,13 +464,13 @@ def tickets2_assign():
         FROM tickets
         WHERE REGEXP_REPLACE(
                   UPPER(TRIM(party_name)),
-                  '\\s+',
+                  '\s+',
                   ' ',
                   'g'
               ) =
               REGEXP_REPLACE(
                   UPPER(TRIM(%s)),
-                  '\\s+',
+                  '\s+',
                   ' ',
                   'g'
               )
