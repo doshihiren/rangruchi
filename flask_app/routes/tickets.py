@@ -349,7 +349,7 @@ def tickets2():
              = regexp_replace(UPPER(t.party_name),'\s+',' ','g')
         LEFT JOIN LATERAL (
             SELECT mobile FROM tally_agency_master
-            WHERE UPPER(TRIM(agency_name)) = UPPER(TRIM(COALESCE(NULLIF(tpm.agency_name,''),NULLIF(t.agency_name,''))))
+            WHERE UPPER(REGEXP_REPLACE(TRIM(agency_name), '\\s+', ' ', 'g')) = UPPER(REGEXP_REPLACE(TRIM(COALESCE(NULLIF(tpm.agency_name,''),NULLIF(t.agency_name,''))), '\\s+', ' ', 'g'))
             AND mobile IS NOT NULL AND mobile != '' ORDER BY LENGTH(agency_name) ASC LIMIT 1
         ) tam ON TRUE
         LEFT JOIN (
@@ -515,6 +515,12 @@ def tickets2_assign():
           AND (archived IS NULL OR archived=FALSE)
           AND assigned_to IS DISTINCT FROM %s
     """, (assignee or None, ticket["party_name"], assignee or None))
+
+    # Reassignment creates a fresh actionable reminder when old history
+    # was archived; historical rows remain untouched.
+    if assignee:
+        from flask_app.routes.followups import ensure_assignment_reminders
+        ensure_assignment_reminders(party_name=ticket["party_name"])
 
     # Verify the actual database value after the UPDATE.
     updated = fetchone("""
