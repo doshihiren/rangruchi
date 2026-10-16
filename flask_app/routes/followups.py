@@ -81,11 +81,43 @@ def add_history(rows):
         result.append(row)
     return result
 
+def ensure_assignment_reminders(party_name=None, username=None):
+    """Create one actionable reminder when an assigned due ticket has no active followup.
+
+    Archived followups remain intact. The assignment date is the reminder due
+    date: reassigned today appears in Today; older assignments in Overdue.
+    """
+    from db import execute
+    if not party_name and not username:
+        return
+    execute("""
+        INSERT INTO followups
+            (ticket_id, party_name, bill_no, status, priority,
+             last_call_date, next_followup_date, promise_amount,
+             assigned_to, assigned_role, notes, created_by, created_at, updated_at)
+        SELECT t.id, t.party_name, COALESCE(t.bill_no,''), 'Pending', 'Medium',
+               NULL, COALESCE(t.assigned_on::date, CURRENT_DATE), 0,
+               t.assigned_to, 'System',
+               'Automatically scheduled after assignment', 'SYSTEM', NOW(), NOW()
+        FROM tickets t
+        WHERE t.net_due > 0
+          AND COALESCE(TRIM(t.assigned_to),'') <> ''
+          AND (%s IS NULL OR t.party_name=%s)
+          AND (%s IS NULL OR UPPER(TRIM(t.assigned_to))=UPPER(TRIM(%s)))
+          AND NOT EXISTS (
+              SELECT 1 FROM followups f
+              WHERE f.party_name=t.party_name
+                AND (f.archived IS NULL OR f.archived=FALSE)
+          )
+    """, (party_name, party_name, username, username))
+
+
 # ── Main followups route ──────────────────────────────────────────────────────
 
 @followups_bp.route("/followups")
 @login_required
 def followups():
+    ensure_assignment_reminders(username=session.get("username", ""))
     fh, fp  = get_fu_filter()
     wh, wp  = get_ticket_filter()
     un      = session.get("username","")
