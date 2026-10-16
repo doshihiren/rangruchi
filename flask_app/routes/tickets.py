@@ -337,7 +337,7 @@ def tickets2():
         SELECT
             t.party_name, t.ticket_number, t.credit_days, t.net_due,
             t.assigned_to, t.party_mobile, t.assigned_on,
-            COALESCE(NULLIF(t.agency_name,''), NULLIF(tpm.agency_name,''), '') AS agency_full,
+            COALESCE(NULLIF(tpm.agency_name,''), NULLIF(t.agency_name,''), '') AS agency_full,
             COALESCE(tam.mobile, '') AS agency_phone,
             COALESCE(p.pdc_total, 0) AS pdc_total,
             COALESCE(db2.due_count, 0) AS due_count,
