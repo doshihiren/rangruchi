@@ -199,11 +199,14 @@ def run_targeted_sync(kind):
                         if key in ("CASH", "SELF", "DIRECT") or key in collisions:
                             continue
                         phone = normalized_groups.get(key)
+                        # Permit unique live Tally suffix " F" only when no exact match exists.
+                        if not phone and key + " F" in normalized_groups and key + " F" not in collisions:
+                            phone = normalized_groups[key + " F"]
                         if not phone:
                             continue
                         # Respect existing records even when casing differs.
                         cur.execute("""SELECT id, mobile FROM tally_agency_master
-                            WHERE UPPER(TRIM(agency_name))=%s""", (key,))
+                            WHERE UPPER(REGEXP_REPLACE(TRIM(agency_name), '\\s+', ' ', 'g'))=%s""", (key,))
                         matched = cur.fetchall()
                         if len(matched) > 1:
                             continue
