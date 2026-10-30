@@ -1060,36 +1060,16 @@ def _post_sync_updates():
         """)
         _logger.info(f"Post-sync: agency from mapping={_cu.rowcount} parties")
 
-        # 3b. Sync agency from tally_party_master (only if longer or empty)
+        # 3b. Current Tally Party Master is authoritative, including shorter names
         _cu.execute("""
             UPDATE tickets t SET agency_name = tpm.agency_name
             FROM tally_party_master tpm
             WHERE UPPER(TRIM(tpm.party_name)) = UPPER(TRIM(t.party_name))
             AND tpm.agency_name IS NOT NULL AND TRIM(tpm.agency_name) != ''
             AND LOWER(TRIM(tpm.agency_name)) NOT IN ('nan','none','null')
-            AND (t.agency_name IS NULL OR TRIM(t.agency_name) = ''
-                 OR LENGTH(tpm.agency_name) > LENGTH(t.agency_name))
+            AND t.agency_name IS DISTINCT FROM tpm.agency_name
         """)
         _logger.info(f"Post-sync: agency from tpm={_cu.rowcount} parties")
-
-        # 3c. Expand truncated agency names using LIKE (fixes Tally truncation bug)
-        _cu.execute(r"""
-            UPDATE tickets t SET agency_name = tam.agency_name
-            FROM tally_agency_master tam
-            WHERE tam.agency_name LIKE t.agency_name || '%%'
-            AND LENGTH(tam.agency_name) > LENGTH(COALESCE(t.agency_name,''))
-            AND t.agency_name IS NOT NULL AND TRIM(t.agency_name) != ''
-            AND LOWER(t.agency_name) NOT IN ('nan','none','null','self','cash')
-        """)
-        _cu.execute(r"""
-            UPDATE tally_party_master tpm SET agency_name = tam.agency_name
-            FROM tally_agency_master tam
-            WHERE tam.agency_name LIKE tpm.agency_name || '%%'
-            AND LENGTH(tam.agency_name) > LENGTH(COALESCE(tpm.agency_name,''))
-            AND tpm.agency_name IS NOT NULL AND TRIM(tpm.agency_name) != ''
-            AND LOWER(tpm.agency_name) NOT IN ('nan','none','null','self','cash')
-        """)
-        _logger.info(f"Post-sync: truncated agencies expanded")
 
         # 3c. Expand truncated agency names using LIKE (fixes Tally truncation bug)
         _cu.execute(r"""
@@ -1144,15 +1124,32 @@ def _post_sync_updates():
         _cu.execute("""UPDATE tally_party_master SET agency_name=NULL
                         WHERE UPPER(TRIM(agency_name))=UPPER(TRIM(party_name))""")
 
-        # 4d. Apply manual agency overrides (always wins over Tally)
+        # 4d. Manual overrides are fallback only when the Tally master has no agency
         _cu.execute("""
             UPDATE tickets t SET agency_name = mo.agency_name
             FROM manual_agency_override mo
             WHERE t.party_name = mo.party_name
+            AND NOT EXISTS (
+                SELECT 1 FROM tally_party_master p
+                WHERE UPPER(TRIM(p.party_name)) = UPPER(TRIM(t.party_name))
+                  AND NULLIF(TRIM(p.agency_name), '') IS NOT NULL
+                  AND LOWER(TRIM(p.agency_name)) NOT IN ('nan','none','null')
+            )
             AND t.agency_name IS DISTINCT FROM mo.agency_name
         """)
         if _cu.rowcount > 0:
             _logger.info(f"Post-sync: manual agency overrides applied={_cu.rowcount}")
+
+        # Ensure normalization/agency expansion never overrides the live party master.
+        _cu.execute("""
+            UPDATE tickets t SET agency_name = p.agency_name
+            FROM tally_party_master p
+            WHERE UPPER(TRIM(p.party_name)) = UPPER(TRIM(t.party_name))
+              AND NULLIF(TRIM(p.agency_name), '') IS NOT NULL
+              AND LOWER(TRIM(p.agency_name)) NOT IN ('nan','none','null')
+              AND t.agency_name IS DISTINCT FROM p.agency_name
+        """)
+        _logger.info(f"Post-sync: final master agency corrections={_cu.rowcount}")
 
         # Follow-up lifecycle is handled by apply_ticket_due_cycle().
         # Do NOT mass archive/unarchive here: old follow-up history must remain
