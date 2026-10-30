@@ -158,7 +158,7 @@ def run_targeted_sync(kind):
                         if agency:
                             cur.execute("""UPDATE tally_party_master SET agency_name=%s
                                 WHERE UPPER(TRIM(party_name))=%s
-                                AND COALESCE(TRIM(agency_name),'')=''""", (agency,name.upper()))
+                                AND agency_name IS DISTINCT FROM %s""", (agency,name.upper(),agency))
                             totals["party_updates"] += cur.rowcount
                 # Fill tickets directly from their live Tally ledger UDF.
                 # This avoids relying on a potentially stale party-master row.
@@ -178,8 +178,9 @@ def run_targeted_sync(kind):
                 if {"party_name","agency_name"} <= tickets and {"party_name","agency_name"} <= tpm:
                     cur.execute("""UPDATE tickets t SET agency_name=p.agency_name FROM tally_party_master p
                         WHERE UPPER(TRIM(t.party_name))=UPPER(TRIM(p.party_name))
-                        AND COALESCE(TRIM(t.agency_name),'')=''
-                        AND COALESCE(TRIM(p.agency_name),'')<>''""")
+                        AND COALESCE(TRIM(p.agency_name),'')<>''
+                        AND LOWER(TRIM(p.agency_name)) NOT IN ('nan','none','null')
+                        AND t.agency_name IS DISTINCT FROM p.agency_name""")
                     totals["ticket_updates"] += cur.rowcount
                 # Insert missing agency-master rows only for exact normalized
                 # matches to names on active tickets. Never use fuzzy guesses.
