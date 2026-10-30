@@ -57,7 +57,7 @@ def ledger_pdf():
     except Exception:
         tm = {}
 
-    # Use tickets.agency_name first (same as ledger page) - filter nan
+    # Use current Tally Party Master first, matching the ledger page.
     def _clag(v):
         s = str(v or "").strip()
         return "" if s.lower() in ("nan","none","null","—","") else s
@@ -69,9 +69,9 @@ def ledger_pdf():
     except Exception:
         _tkt_ag = ""
     pdf_agency = (
-        _tkt_ag
+        _clag(tm.get("agency_name"))
+        or _tkt_ag
         or _clag(tix.get("agency_name"))
-        or _clag(tm.get("agency_name"))
         or _clag(m.get("agency_name"))
         or "—"
     )
