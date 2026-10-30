@@ -145,9 +145,21 @@ def trigger_sync():
             except Exception as _ame:
                 pass
 
-            # Apply manual overrides LAST
+            # Apply manual overrides only when the current party master has no agency
             _ex("""UPDATE tickets t SET agency_name = mo.agency_name
-                    FROM manual_agency_override mo WHERE t.party_name = mo.party_name""")
+                    FROM manual_agency_override mo WHERE t.party_name = mo.party_name
+                    AND NOT EXISTS (SELECT 1 FROM tally_party_master p
+                        WHERE UPPER(TRIM(p.party_name))=UPPER(TRIM(t.party_name))
+                        AND NULLIF(TRIM(p.agency_name),'') IS NOT NULL
+                        AND LOWER(TRIM(p.agency_name)) NOT IN ('nan','none','null'))""")
+
+            # The party master always wins after Tally sync and agency expansion.
+            _ex("""UPDATE tickets t SET agency_name=p.agency_name
+                    FROM tally_party_master p
+                    WHERE UPPER(TRIM(t.party_name))=UPPER(TRIM(p.party_name))
+                    AND NULLIF(TRIM(p.agency_name),'') IS NOT NULL
+                    AND LOWER(TRIM(p.agency_name)) NOT IN ('nan','none','null')
+                    AND t.agency_name IS DISTINCT FROM p.agency_name""")
 
             errors = [f"{k}: {v}" for k,v in results.items() if str(v).startswith("ERROR")]
             _sync_state["result"] = (
