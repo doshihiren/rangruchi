@@ -150,11 +150,10 @@ def ledger():
             bills["due_in_days"] = (bills["due_dt"] - today_ts).dt.days.fillna(0).astype(int)
 
         # Agency name/mobile: same resolution order as /tickets page
-        # Use tickets.agency_name first (has manual overrides, cleaned)
-        # then tally_party_master, then salesperson_mapping
+        # Use current Tally Party Master first; ticket and mapping are fallbacks.
         _raw_agency = (
-            (tix.get("agency_name") or "").strip()
-            or (tm.get("agency_name") or "").strip()
+            (tm.get("agency_name") or "").strip()
+            or (tix.get("agency_name") or "").strip()
             or (m.get("agency_name") or "").strip()
         )
         # Remove self-referencing agency
