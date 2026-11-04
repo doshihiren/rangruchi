@@ -781,46 +781,41 @@ def sync_pdc():
         return 0
 
 def sync_credit_days_from_master():
-    """Copy Tally credit period onto tickets.
+    """Copy the party credit period from the exact Tally-synced mapping.
 
-    Primary source is salesperson_mapping.credit_period_days (filled from
-    BILLCREDITPERIOD during sync_ledger_masters). Fallback to
-    tally_party_master.credit_period_days when present.
+    Normalize repeated spaces, since Tally and tickets sometimes differ.
+    Never change a credit period where no verified mapping value exists.
     """
-    # Prefer salesperson_mapping (always updated from Tally BILLCREDITPERIOD)
-    execute(r"""
+    execute("""
         UPDATE tickets t
-        SET credit_days = sm.credit_period_days
-        FROM salesperson_mapping sm
-        WHERE regexp_replace(upper(sm.party_name),'\\s+',' ','g')
-            = regexp_replace(upper(t.party_name),'\\s+',' ','g')
-          AND sm.credit_period_days IS NOT NULL
-          AND sm.credit_period_days > 0
-          AND t.credit_days IS DISTINCT FROM sm.credit_period_days::text
+           SET credit_days = sm.credit_period_days::text
+          FROM salesperson_mapping sm
+         WHERE REGEXP_REPLACE(UPPER(TRIM(sm.party_name)), '[[:space:]]+', ' ', 'g')
+             = REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g')
+           AND sm.credit_period_days > 0
+           AND t.credit_days IS DISTINCT FROM sm.credit_period_days::text
     """)
-    # Fallback: tally_party_master if column exists and mapping was empty
     try:
-        execute(r"""
+        execute("""
             UPDATE tickets t
-            SET credit_days = tpm.credit_period_days
-            FROM tally_party_master tpm
-            WHERE regexp_replace(upper(tpm.party_name),'\\s+',' ','g')
-                = regexp_replace(upper(t.party_name),'\\s+',' ','g')
-              AND tpm.credit_period_days IS NOT NULL
-              AND tpm.credit_period_days > 0
-              AND (t.credit_days IS NULL OR t.credit_days = 0)
+               SET credit_days = p.credit_period_days::text
+              FROM tally_party_master p
+             WHERE REGEXP_REPLACE(UPPER(TRIM(p.party_name)), '[[:space:]]+', ' ', 'g')
+                 = REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g')
+               AND p.credit_period_days > 0
+               AND (NULLIF(TRIM(t.credit_days),'') IS NULL OR t.credit_days='0')
         """)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Optional Tally master credit fallback skipped: %s", exc)
 
 
 def recompute_net_due(default_credit_days=30):
-    """Due = overdue billwise pending amount less PDC and on-account receipts.
+    """Recalculate due only from credit-expired invoices, minus PDC/on-account.
 
-    Only invoices beyond the party's credit period qualify; all other
-    outstanding remains visible as outstanding, not collectible due.
+    All name joins normalize whitespace; billwise stays the source of truth
+    for the bill amounts. Human-entered follow-up rows are not modified.
     """
-    sql = r"""
+    sql = """
         WITH due AS (
             SELECT
                 t.id,
@@ -828,28 +823,31 @@ def recompute_net_due(default_credit_days=30):
                     COALESCE((
                         SELECT SUM(b.pending_amount)
                         FROM billwise b
-                        WHERE regexp_replace(upper(b.party_name),'\\s+',' ','g')
-                            = regexp_replace(upper(t.party_name),'\\s+',' ','g')
+                        WHERE REGEXP_REPLACE(UPPER(TRIM(b.party_name)), '[[:space:]]+', ' ', 'g')
+                            = REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g')
                           AND b.pending_amount > 0
                           AND b.invoice_no NOT ILIKE '%%on account%%'
-                          AND b.invoice_date LIKE '__-___-__'
+                          AND b.invoice_date ~ '^[0-9]{2}-[A-Za-z]{3}-[0-9]{2}$'
                           AND (
                               TO_DATE(b.invoice_date,'DD-Mon-YY')
-                              + (COALESCE(NULLIF(t.credit_days,'')::int,%s)
-                                 * INTERVAL '1 day')
+                              + (CASE
+                                   WHEN TRIM(COALESCE(t.credit_days,'')) ~ '^[1-9][0-9]*$'
+                                   THEN t.credit_days::int
+                                   ELSE %s
+                                 END) * INTERVAL '1 day'
                           ) < CURRENT_DATE
                     ),0)
                     - COALESCE((
                         SELECT SUM(pe.amount)
                         FROM pdc_entries pe
-                        WHERE regexp_replace(upper(pe.party_name),'\\s+',' ','g')
-                            = regexp_replace(upper(t.party_name),'\\s+',' ','g')
+                        WHERE REGEXP_REPLACE(UPPER(TRIM(pe.party_name)), '[[:space:]]+', ' ', 'g')
+                            = REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g')
                     ),0)
                     - COALESCE((
                         SELECT SUM(b2.pending_amount)
                         FROM billwise b2
-                        WHERE regexp_replace(upper(b2.party_name),'\\s+',' ','g')
-                            = regexp_replace(upper(t.party_name),'\\s+',' ','g')
+                        WHERE REGEXP_REPLACE(UPPER(TRIM(b2.party_name)), '[[:space:]]+', ' ', 'g')
+                            = REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g')
                           AND b2.pending_amount > 0
                           AND b2.invoice_no ILIKE '%%on account%%'
                     ),0),
@@ -858,9 +856,10 @@ def recompute_net_due(default_credit_days=30):
             FROM tickets t
         )
         UPDATE tickets t
-        SET net_due = due.net_due
-        FROM due
-        WHERE t.id = due.id
+           SET net_due = due.net_due
+          FROM due
+         WHERE t.id = due.id
+           AND t.net_due IS DISTINCT FROM due.net_due
     """
     execute(sql, (default_credit_days,))
 
