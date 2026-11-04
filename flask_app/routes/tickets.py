@@ -83,14 +83,14 @@ def tickets():
                    sm.agent_name, sm.agency_name, sm.seller_name,
                    sm.party_state, sm.party_place, sm.party_mobile,
                    sma.party_mobile AS agency_mobile,
-                   (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, 30) * INTERVAL '1 day'))::date AS due_date
+                   (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, sm_credit.credit_period_days, 30) * INTERVAL '1 day'))::date AS due_date
             FROM billwise b
             LEFT JOIN salesperson_mapping sm ON sm.party_name = b.party_name
             LEFT JOIN salesperson_mapping sma ON UPPER(sma.party_name)=UPPER(sm.agency_name)
             LEFT JOIN tickets t ON t.party_name = b.party_name
             WHERE b.pending_amount > 0
             AND b.invoice_date ~ '^[0-9]{2}-[A-Za-z]{3}-[0-9]{2}$'
-            AND (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, 30) * INTERVAL '1 day'))::date
+            AND (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, sm_credit.credit_period_days, 30) * INTERVAL '1 day'))::date
                 BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
             ORDER BY due_date ASC
         """)
@@ -113,7 +113,7 @@ def tickets():
             WHERE b.pending_amount > 0
             AND b.invoice_no NOT ILIKE '%%on account%%'
              AND b.invoice_date LIKE '__-___-__'
-             AND (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, 30) * INTERVAL '1 day')) < CURRENT_DATE
+             AND (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, sm_credit.credit_period_days, 30) * INTERVAL '1 day')) < CURRENT_DATE
             ORDER BY b.overdue_days DESC
         """)
         # Apply filters on due list
@@ -256,7 +256,7 @@ def tickets():
                 WHERE b.pending_amount > 0
                 AND b.invoice_no NOT ILIKE '%on account%'
                 AND b.invoice_date LIKE '__-___-__'
-                AND (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, 30) * INTERVAL '1 day')) < CURRENT_DATE
+                AND (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, sm_credit.credit_period_days, 30) * INTERVAL '1 day')) < CURRENT_DATE
                 GROUP BY b.party_name
             """)
             if not _bc.empty:
@@ -339,7 +339,9 @@ def tickets2():
 
     MAIN_SQL = r"""
         SELECT
-            t.party_name, t.ticket_number, t.credit_days, t.net_due,
+            t.party_name, t.ticket_number,
+            COALESCE(NULLIF(t.credit_days,'')::int, sm_credit.credit_period_days, 30) AS credit_days,
+            t.net_due,
             t.assigned_to, t.party_mobile, t.assigned_on,
             COALESCE(NULLIF(tpm.agency_name,''), NULLIF(t.agency_name,''), '') AS agency_full,
             COALESCE(tam.mobile, '') AS agency_phone,
@@ -351,6 +353,9 @@ def tickets2():
         LEFT JOIN tally_party_master tpm
             ON regexp_replace(UPPER(tpm.party_name),'\s+',' ','g')
              = regexp_replace(UPPER(t.party_name),'\s+',' ','g')
+        LEFT JOIN salesperson_mapping sm_credit
+            ON REGEXP_REPLACE(UPPER(TRIM(sm_credit.party_name)), '[[:space:]]+', ' ', 'g')
+             = REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g')
         LEFT JOIN LATERAL (
             SELECT mobile FROM tally_agency_master
             WHERE UPPER(REGEXP_REPLACE(TRIM(agency_name), '\s+', ' ', 'g')) = UPPER(REGEXP_REPLACE(TRIM(COALESCE(NULLIF(tpm.agency_name,''),NULLIF(t.agency_name,''))), '\s+', ' ', 'g'))
@@ -363,14 +368,14 @@ def tickets2():
         LEFT JOIN LATERAL (
             SELECT COUNT(*) AS due_count,
                    MAX(CURRENT_DATE - (TO_DATE(b.invoice_date,'DD-Mon-YY') +
-                       (COALESCE(NULLIF(t.credit_days,'')::int, 30) * INTERVAL '1 day'))::date) AS max_overdue
+                       (COALESCE(NULLIF(t.credit_days,'')::int, sm_credit.credit_period_days, 30) * INTERVAL '1 day'))::date) AS max_overdue
             FROM billwise b
-            WHERE regexp_replace(UPPER(TRIM(b.party_name)), '\\s+', ' ', 'g')
-                = regexp_replace(UPPER(TRIM(t.party_name)), '\\s+', ' ', 'g')
+            WHERE REGEXP_REPLACE(UPPER(TRIM(b.party_name)), '[[:space:]]+', ' ', 'g')
+                = REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g')
               AND b.pending_amount > 0
               AND b.invoice_no NOT ILIKE '%%on account%%'
               AND b.invoice_date LIKE '__-___-__'
-              AND (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, 30) * INTERVAL '1 day')) < CURRENT_DATE
+              AND (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, sm_credit.credit_period_days, 30) * INTERVAL '1 day')) < CURRENT_DATE
         ) db2 ON TRUE
         LEFT JOIN (
             SELECT party_name, COUNT(*) AS fu_count
