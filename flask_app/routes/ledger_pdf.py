@@ -153,7 +153,7 @@ def ledger_pdf():
                 unalloc_pdf = ladv
 
         due_bills = all_pending[
-            (all_pending["due_in_days"] <= 0) &
+            (all_pending["due_in_days"] < 0) &
             (~all_pending["invoice_no"].str.contains("on account", case=False, na=False))
         ]
         total_due = float(due_bills["pending_amount"].sum())
