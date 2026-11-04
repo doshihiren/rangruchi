@@ -107,8 +107,8 @@ def _normalize_party(name):
     return value
 
 def _match_missing_ticket_parties(cur, parties):
-    """Find unique, exact party-name matches before touching any ticket."""
-    cur.execute("SELECT DISTINCT party_name FROM tickets WHERE COALESCE(TRIM(agency_name),'')=''")
+    """Find unique live Tally ledger names, including existing stale agencies."""
+    cur.execute("SELECT DISTINCT party_name FROM tickets")
     names = [str(r[0]) for r in cur.fetchall()]
     mapped = {}
     ambiguous = set()
@@ -165,9 +165,21 @@ def run_targeted_sync(kind):
                 if {"party_name", "agency_name"} <= tickets:
                     for ticket_name, agency in _match_missing_ticket_parties(cur, parties):
                         cur.execute("""UPDATE tickets SET agency_name=%s
-                            WHERE party_name=%s AND COALESCE(TRIM(agency_name),'')=''""",
-                            (agency, ticket_name))
+                            WHERE party_name=%s AND agency_name IS DISTINCT FROM %s""",
+                            (agency, ticket_name, agency))
                         totals["ticket_updates"] += cur.rowcount
+                # Refresh existing salesperson mapping from exact live Tally ledgers.
+                # Necessary when the current party has no matching master row.
+                mapping_cols = _columns(cur, "salesperson_mapping")
+                if {"party_name", "agency_name"} <= mapping_cols:
+                    for name, agency, phone, agent in parties.values():
+                        if agency:
+                            cur.execute("""UPDATE salesperson_mapping
+                                SET agency_name=%s
+                                WHERE UPPER(TRIM(party_name))=%s
+                                  AND agency_name IS DISTINCT FROM %s""",
+                                (agency, name.upper(), agency))
+                
                 if {"party_name", "agent_name"} <= tickets:
                     for name, agency, phone, agent in parties.values():
                         if agent:
