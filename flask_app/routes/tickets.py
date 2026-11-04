@@ -365,7 +365,8 @@ def tickets2():
                    MAX(CURRENT_DATE - (TO_DATE(b.invoice_date,'DD-Mon-YY') +
                        (COALESCE(NULLIF(t.credit_days,'')::int, 30) * INTERVAL '1 day'))::date) AS max_overdue
             FROM billwise b
-            WHERE b.party_name = t.party_name
+            WHERE regexp_replace(UPPER(TRIM(b.party_name)), '\\s+', ' ', 'g')
+                = regexp_replace(UPPER(TRIM(t.party_name)), '\\s+', ' ', 'g')
               AND b.pending_amount > 0
               AND b.invoice_no NOT ILIKE '%%on account%%'
               AND b.invoice_date LIKE '__-___-__'
@@ -376,6 +377,7 @@ def tickets2():
             FROM followups GROUP BY party_name
         ) fc ON fc.party_name = t.party_name
         WHERE t.net_due > 0
+          AND COALESCE(db2.due_count,0) > 0
     """
 
     conn2 = get_conn()
