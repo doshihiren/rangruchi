@@ -204,22 +204,16 @@ def ledger():
         # Due bills: past credit period, not on-account
         if not all_pending_df.empty and "due_in_days" in all_pending_df.columns:
             due_bills_df = all_pending_df[
-                (~onacct_mask) & (all_pending_df["due_in_days"] <= 0)
+                (~onacct_mask) & (all_pending_df["due_in_days"] < 0)
             ]
         else:
-            due_bills_df = all_pending_df[~onacct_mask] if not all_pending_df.empty else pd.DataFrame()
+            due_bills_df = pd.DataFrame()  # no dated, credit-expired bills
         bills_due_total  = float(due_bills_df["pending_amount"].sum()) if not due_bills_df.empty else 0.0
         pdc_amount_total = sum(float(p.get("amount", 0)) for p in pdc_entries)
-        # IMPORTANT: Tally's current ledger balance already includes normal receipts/credits.
-        # Use that current balance as the base for net due, then subtract only the
-        # separately-synced PDC amount and the genuinely unallocated/on-account amount.
-        # This prevents a receipt already reflected in Tally Closing Balance from
-        # being counted again as an overdue bill.
-        if ledger_balance is not None:
-            due_amount = max(0.0, abs(ledger_balance) - pdc_amount_total - unallocated)
-        else:
-            # Safe fallback only when Tally outstanding is unavailable.
-            due_amount = max(0.0, bills_due_total - pdc_amount_total - unallocated)
+        # Outstanding balance includes bills still inside their credit period.
+        # Never use it as Net Due: only overdue billwise rows qualify.
+        # This guarantees zero overdue bills -> zero due even if outstanding > 0.
+        due_amount = max(0.0, bills_due_total - pdc_amount_total - unallocated)
 
         data.update({
             "bills":            due_bills_df.to_dict("records") if not due_bills_df.empty else [],
