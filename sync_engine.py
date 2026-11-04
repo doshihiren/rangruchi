@@ -815,10 +815,10 @@ def sync_credit_days_from_master():
 
 
 def recompute_net_due(default_credit_days=30):
-    """Calculate collectible due only from bills past each party's credit days.
+    """Due = overdue billwise pending amount less PDC and on-account receipts.
 
-    Uses a positive credit period from the Tally-synced ticket, or the
-    configured default when missing/zero; preserves PDC and on-account offsets.
+    Only invoices beyond the party's credit period qualify; all other
+    outstanding remains visible as outstanding, not collectible due.
     """
     sql = r"""
         WITH due AS (
@@ -828,28 +828,28 @@ def recompute_net_due(default_credit_days=30):
                     COALESCE((
                         SELECT SUM(b.pending_amount)
                         FROM billwise b
-                        WHERE regexp_replace(upper(b.party_name),'\s+',' ','g')
-                            = regexp_replace(upper(t.party_name),'\s+',' ','g')
+                        WHERE regexp_replace(upper(b.party_name),'\\s+',' ','g')
+                            = regexp_replace(upper(t.party_name),'\\s+',' ','g')
                           AND b.pending_amount > 0
                           AND b.invoice_no NOT ILIKE '%%on account%%'
-                          AND b.invoice_date ~ '^[0-9]{2}-[A-Za-z]{3}-[0-9]{2}$'
+                          AND b.invoice_date LIKE '__-___-__'
                           AND (
-                                TO_DATE(b.invoice_date,'DD-Mon-YY')
-                                + (CASE
-                                      WHEN TRIM(COALESCE(t.credit_days,'')) ~ '^[1-9][0-9]*
-                              ) < CURRENT_DATE
+                              TO_DATE(b.invoice_date,'DD-Mon-YY')
+                              + (COALESCE(NULLIF(t.credit_days,'')::int,%s)
+                                 * INTERVAL '1 day')
+                          ) < CURRENT_DATE
                     ),0)
                     - COALESCE((
                         SELECT SUM(pe.amount)
                         FROM pdc_entries pe
-                        WHERE regexp_replace(upper(pe.party_name),'\s+',' ','g')
-                            = regexp_replace(upper(t.party_name),'\s+',' ','g')
+                        WHERE regexp_replace(upper(pe.party_name),'\\s+',' ','g')
+                            = regexp_replace(upper(t.party_name),'\\s+',' ','g')
                     ),0)
                     - COALESCE((
                         SELECT SUM(b2.pending_amount)
                         FROM billwise b2
-                        WHERE regexp_replace(upper(b2.party_name),'\s+',' ','g')
-                            = regexp_replace(upper(t.party_name),'\s+',' ','g')
+                        WHERE regexp_replace(upper(b2.party_name),'\\s+',' ','g')
+                            = regexp_replace(upper(t.party_name),'\\s+',' ','g')
                           AND b2.pending_amount > 0
                           AND b2.invoice_no ILIKE '%%on account%%'
                     ),0),
@@ -863,7 +863,6 @@ def recompute_net_due(default_credit_days=30):
         WHERE t.id = due.id
     """
     execute(sql, (default_credit_days,))
-
 
 
 def apply_ticket_due_cycle():
@@ -1016,6 +1015,16 @@ def run_full_sync():
 
     logger.info(f"SYNC COMPLETE: {results}")
     _post_sync_updates()
+    # Refresh current agency UDFs from live ledger names after stale mappings
+    # and the older master sync have finished; keeps future Tally Syncs correct.
+    try:
+        from agency_contact_sync import run_targeted_sync
+        agency_result = run_targeted_sync("agency")
+        results["live_agency"] = "updated"
+        logger.info("Live Tally agency refresh: %s", agency_result)
+    except Exception as exc:
+        results["live_agency"] = "ERROR: " + str(exc)
+        logger.warning("Live agency refresh failed: %s", exc)
     return results
 
 if __name__ == "__main__":
