@@ -104,7 +104,7 @@ if(nextFu) nextFu.value = today;
           <a href="tel:{{ mobile[-10:] }}" class="text-sm font-semibold text-blue-500 ml-2">📱 {{ mobile[-10:] }}</a>
           {% endif %}
         </h2>
-        <div class="text-slate-400 text-xs mt-0.5">Party ledger &middot; {{ bills|length }} bill(s) on record</div>
+        <div class="text-slate-400 text-xs mt-0.5">Party ledger &middot; {{ bills|length }} overdue bill(s)</div>
       </div>
       <a href="/ledger/pdf?party={{ selected|urlencode }}"
          class="flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold px-3 py-2 rounded-lg text-xs transition">
