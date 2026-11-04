@@ -815,7 +815,11 @@ def sync_credit_days_from_master():
 
 
 def recompute_net_due(default_credit_days=30):
-    """Calculate Net Due from overdue billwise amounts, less PDC and on-account."""
+    """Calculate collectible due only from bills past each party's credit days.
+
+    Uses a positive credit period from the Tally-synced ticket, or the
+    configured default when missing/zero; preserves PDC and on-account offsets.
+    """
     sql = r"""
         WITH due AS (
             SELECT
@@ -831,7 +835,351 @@ def recompute_net_due(default_credit_days=30):
                           AND b.invoice_date ~ '^[0-9]{2}-[A-Za-z]{3}-[0-9]{2}$'
                           AND (
                                 TO_DATE(b.invoice_date,'DD-Mon-YY')
-                                + (COALESCE(NULLIF(t.credit_days,'')::int,%s) || ' days')::interval
+                                + (CASE
+                                      WHEN TRIM(COALESCE(t.credit_days,'')) ~ '^[1-9][0-9]*
+                              ) < CURRENT_DATE
+                    ),0)
+                    - COALESCE((
+                        SELECT SUM(pe.amount)
+                        FROM pdc_entries pe
+                        WHERE regexp_replace(upper(pe.party_name),'\s+',' ','g')
+                            = regexp_replace(upper(t.party_name),'\s+',' ','g')
+                    ),0)
+                    - COALESCE((
+                        SELECT SUM(b2.pending_amount)
+                        FROM billwise b2
+                        WHERE regexp_replace(upper(b2.party_name),'\s+',' ','g')
+                            = regexp_replace(upper(t.party_name),'\s+',' ','g')
+                          AND b2.pending_amount > 0
+                          AND b2.invoice_no ILIKE '%%on account%%'
+                    ),0),
+                    0
+                ) AS net_due
+            FROM tickets t
+        )
+        UPDATE tickets t
+        SET net_due = due.net_due
+        FROM due
+        WHERE t.id = due.id
+    """
+    execute(sql, (default_credit_days,))
+
+
+
+def apply_ticket_due_cycle():
+    """Apply ticket visibility/assignment rules from the NEW net_due state.
+
+    - net_due <= 0: close the ticket, but preserve assigned_to and all history.
+    - net_due > 0 after a previously closed cycle: start a fresh collection
+      cycle by clearing assignment and archiving OLD followups only.
+    - net_due > 0 for an already-open ticket: preserve current assignment and
+      followups.
+    - No followup rows are deleted.
+    """
+    try:
+        execute("ALTER TABLE followups ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE")
+    except Exception as e:
+        logger.warning(f"Could not ensure followups.archived: {e}")
+
+    # A closed ticket with a new positive Net Due is a genuinely new cycle.
+    # Archive its old followups and unassign it so the owner can reassign it.
+    execute("""
+        UPDATE followups f
+        SET archived = TRUE
+        FROM tickets t
+        WHERE f.party_name = t.party_name
+          AND COALESCE(t.net_due,0) > 0
+          AND COALESCE(t.status,'') = 'Closed'
+          AND (f.archived IS NULL OR f.archived = FALSE)
+    """)
+
+    execute("""
+        UPDATE tickets
+        SET assigned_to = NULL,
+            assigned_on = NULL,
+            status = 'Open',
+            closed_date = NULL
+        WHERE COALESCE(net_due,0) > 0
+          AND COALESCE(status,'') = 'Closed'
+    """)
+
+    # Closing does NOT clear assignment/history.
+    execute("""
+        UPDATE tickets
+        SET status = 'Closed',
+            closed_date = COALESCE(closed_date, CURRENT_DATE)
+        WHERE COALESCE(net_due,0) <= 0
+          AND COALESCE(status,'') <> 'Closed'
+    """)
+
+    execute("""
+        UPDATE tickets
+        SET status = 'Open'
+        WHERE COALESCE(net_due,0) > 0
+    """)
+
+    logger.info("Ticket due-cycle state applied: net_due controls Open/Closed; "
+                "new cycles are unassigned and old followups archived.")
+
+
+def run_full_sync():
+    if not tally_alive():
+        try:
+            _log_sync("full_sync", 0, "Skipped", "Tally not reachable")
+        except Exception:
+            pass
+        print("Tally not reachable - FULL SYNC ABORTED, existing data kept")
+        return {"status": "skipped", "reason": "Tally not reachable"}
+    logger.info("="*50)
+    logger.info(f"TALLY URL: {TALLY_URL}")
+    logger.info("FULL TALLY SYNC STARTED")
+    logger.info("="*50)
+    results = {}
+    try: results["outstanding"] = sync_outstanding()
+    except Exception as e: results["outstanding"] = f"ERROR: {e}"
+    try: results["billwise"] = sync_billwise()
+    except Exception as e: results["billwise"] = f"ERROR: {e}"
+    try: results["ledger_masters"] = sync_ledger_masters()
+    except Exception as e: results["ledger_masters"] = f"ERROR: {e}"
+    try: results["tickets"] = build_tickets()
+    except Exception as e: results["tickets"] = f"ERROR: {e}"
+    try: results["pdc"] = sync_pdc()
+    except Exception as e: results["pdc"] = f"ERROR: {e}"
+	# Fix single-digit dates after every sync
+    try:
+        from db import execute
+        execute("""UPDATE billwise SET invoice_date = LPAD(SPLIT_PART(invoice_date,'-',1),2,'0') || '-' || SPLIT_PART(invoice_date,'-',2) || '-' || SPLIT_PART(invoice_date,'-',3) WHERE invoice_date ~ '^[0-9]{1}-[A-Za-z]'""")
+    except: pass
+# Fix mobile numbers after every sync
+    try:
+        execute("""UPDATE salesperson_mapping 
+            SET party_mobile = RIGHT(REGEXP_REPLACE(party_mobile, '[^0-9]', '', 'g'), 10)
+            WHERE party_mobile IS NOT NULL 
+            AND LENGTH(REGEXP_REPLACE(party_mobile, '[^0-9]', '', 'g')) >= 10""")
+        execute("""UPDATE tickets t SET party_mobile = sm.party_mobile
+            FROM salesperson_mapping sm
+            WHERE sm.party_name = t.party_name
+            AND sm.party_mobile IS NOT NULL
+            AND LENGTH(sm.party_mobile) = 10""")
+        # Sync party_place (city) and agency_mobile to tickets table
+        execute("""
+            UPDATE tickets t SET
+                party_place = sm.party_place,
+                agency_mobile = sm.agency_mobile
+            FROM salesperson_mapping sm
+            WHERE t.party_name = sm.party_name
+            AND (sm.party_place IS NOT NULL OR sm.agency_mobile IS NOT NULL)
+        """)
+        # Also update party_mobile from tally_party_master (newer source)
+        _c2 = None
+        try:
+            from db import get_conn as _gc2, release_conn as _rc2
+            _c2 = _gc2()
+            _cu2 = _c2.cursor()
+            _cu2.execute("""
+                UPDATE tickets t SET party_mobile = tpm.mobile
+                FROM tally_party_master tpm
+                WHERE tpm.party_name = t.party_name
+                AND tpm.mobile IS NOT NULL AND TRIM(tpm.mobile) != ''
+                AND tpm.mobile != t.party_mobile
+            """)
+            _cu2.execute("""
+                UPDATE salesperson_mapping sm SET party_mobile = tpm.mobile
+                FROM tally_party_master tpm
+                WHERE tpm.party_name = sm.party_name
+                AND tpm.mobile IS NOT NULL AND TRIM(tpm.mobile) != ''
+                AND tpm.mobile != sm.party_mobile
+            """)
+            _c2.commit()
+            _cu2.close()
+            _rc2(_c2)
+        except Exception as _me:
+            logger.error(f"Mobile update from tpm: {_me}")
+            if _c2:
+                try: _rc2(_c2)
+                except: pass
+        logger.info("Mobile numbers synced to tickets")
+    except Exception as e:
+        logger.error(f"Mobile sync error: {e}")
+
+    # Credit period + net_due — MUST run last, after build_tickets/ledger_masters/pdc
+    try:
+        sync_credit_days_from_master()
+        recompute_net_due()
+        apply_ticket_due_cycle()
+        results["credit_netdue"] = "recomputed"
+        logger.info("Credit days pulled from master + net_due + ticket cycle state recomputed")
+    except Exception as e:
+        results["credit_netdue"] = f"ERROR: {e}"
+        logger.warning(f"Credit/net_due recompute skipped (will retry in post-sync): {e}")
+        # _post_sync_updates() handles this as fallback
+
+    logger.info(f"SYNC COMPLETE: {results}")
+    _post_sync_updates()
+    return results
+
+if __name__ == "__main__":
+    run_full_sync()
+
+
+def _post_sync_updates():
+    """
+    Runs after every sync.
+    Uses pool properly with try/finally to always release connection.
+    1. Sync credit_days from salesperson_mapping
+    2. Clear nan + sync agency from tally_party_master
+    3. Expand short agency names
+    4. Auto-archive followups for net_due=0 parties
+    Note: net_due already recalculated by recompute_net_due() in run_full_sync
+    """
+    import logging as _log2
+    _logger = _log2.getLogger(__name__)
+    from db import get_conn as _gc, release_conn as _rc
+    _c = None
+    try:
+        _c = _gc()
+        _cu = _c.cursor()
+
+        # 1. Sync credit_days from salesperson_mapping
+        _cu.execute("""
+            UPDATE tickets t SET credit_days = sm.credit_period_days::text
+            FROM salesperson_mapping sm
+            WHERE sm.party_name = t.party_name
+            AND sm.credit_period_days IS NOT NULL AND sm.credit_period_days > 0
+        """)
+        _logger.info(f"Post-sync: credit_days={_cu.rowcount} parties")
+
+        # 2. Clear nan agency
+        _cu.execute("""UPDATE tickets SET agency_name = NULL
+                       WHERE LOWER(TRIM(COALESCE(agency_name,'')))
+                       IN ('nan','none','null','','—')""")
+
+        # 3a. Sync agency from salesperson_mapping (preserves manual overrides)
+        _cu.execute("""
+            UPDATE tickets t SET agency_name = sm.agency_name
+            FROM salesperson_mapping sm
+            WHERE sm.party_name = t.party_name
+            AND sm.agency_name IS NOT NULL AND TRIM(sm.agency_name) != ''
+            AND LOWER(TRIM(sm.agency_name)) NOT IN ('nan','none','null')
+            AND (t.agency_name IS NULL OR TRIM(t.agency_name) = '')
+        """)
+        _logger.info(f"Post-sync: agency from mapping={_cu.rowcount} parties")
+
+        # 3b. Current Tally Party Master is authoritative, including shorter names
+        _cu.execute("""
+            UPDATE tickets t SET agency_name = tpm.agency_name
+            FROM tally_party_master tpm
+            WHERE UPPER(TRIM(tpm.party_name)) = UPPER(TRIM(t.party_name))
+            AND tpm.agency_name IS NOT NULL AND TRIM(tpm.agency_name) != ''
+            AND LOWER(TRIM(tpm.agency_name)) NOT IN ('nan','none','null')
+            AND t.agency_name IS DISTINCT FROM tpm.agency_name
+        """)
+        _logger.info(f"Post-sync: agency from tpm={_cu.rowcount} parties")
+
+        # 3c. Expand truncated agency names using LIKE (fixes Tally truncation bug)
+        _cu.execute(r"""
+            UPDATE tickets t SET agency_name = tam.agency_name
+            FROM tally_agency_master tam
+            WHERE tam.agency_name LIKE t.agency_name || '%%'
+            AND LENGTH(tam.agency_name) > LENGTH(COALESCE(t.agency_name,''))
+            AND t.agency_name IS NOT NULL AND TRIM(t.agency_name) != ''
+            AND LOWER(t.agency_name) NOT IN ('nan','none','null','self','cash')
+        """)
+        _cu.execute(r"""
+            UPDATE tally_party_master tpm SET agency_name = tam.agency_name
+            FROM tally_agency_master tam
+            WHERE tam.agency_name LIKE tpm.agency_name || '%%'
+            AND LENGTH(tam.agency_name) > LENGTH(COALESCE(tpm.agency_name,''))
+            AND tpm.agency_name IS NOT NULL AND TRIM(tpm.agency_name) != ''
+            AND LOWER(tpm.agency_name) NOT IN ('nan','none','null','self','cash')
+        """)
+        _logger.info(f"Post-sync: truncated agencies expanded")
+
+        # 4. Expand short agency names to full (only non-empty agencies)
+        _cu.execute("""
+            UPDATE tickets t SET agency_name = tam.agency_name
+            FROM tally_agency_master tam
+            WHERE regexp_replace(UPPER(tam.agency_name),'\\s+',' ','g')
+                LIKE regexp_replace(UPPER(t.agency_name),'\\s+',' ','g') || '%%'
+            AND LENGTH(tam.agency_name) > LENGTH(COALESCE(t.agency_name,''))
+            AND t.agency_name IS NOT NULL AND TRIM(t.agency_name) != ''
+            AND LOWER(TRIM(t.agency_name)) NOT IN ('nan','none','null','self','cash')
+        """)
+        _logger.info(f"Post-sync: agency expanded={_cu.rowcount}")
+
+        # 4b. Also expand in tally_party_master
+        _cu.execute("""
+            UPDATE tally_party_master tpm SET agency_name = tam.agency_name
+            FROM tally_agency_master tam
+            WHERE regexp_replace(UPPER(tam.agency_name),'\\s+',' ','g')
+                LIKE regexp_replace(UPPER(tpm.agency_name),'\\s+',' ','g') || '%%'
+            AND LENGTH(tam.agency_name) > LENGTH(COALESCE(tpm.agency_name,''))
+            AND tpm.agency_name IS NOT NULL AND TRIM(tpm.agency_name) != ''
+            AND LOWER(TRIM(tpm.agency_name)) NOT IN ('nan','none','null','self','cash')
+        """)
+        _logger.info(f"Post-sync: tpm agency expanded={_cu.rowcount}")
+
+        # 4c. Clear only NULL/nan/none agency names (keep self-referencing - valid in Tally)
+        _cu.execute("""UPDATE tickets SET agency_name=NULL
+                        WHERE LOWER(TRIM(COALESCE(agency_name,''))) IN ('nan','none','null','')""")
+        _cu.execute("""UPDATE tally_party_master SET agency_name=NULL
+                        WHERE LOWER(TRIM(COALESCE(agency_name,''))) IN ('nan','none','null','')""")
+        _cu.execute("""UPDATE tickets SET agency_name=NULL
+                        WHERE UPPER(TRIM(agency_name))=UPPER(TRIM(party_name))""")
+        _cu.execute("""UPDATE tally_party_master SET agency_name=NULL
+                        WHERE UPPER(TRIM(agency_name))=UPPER(TRIM(party_name))""")
+
+        # 4d. Manual overrides are fallback only when the Tally master has no agency
+        _cu.execute("""
+            UPDATE tickets t SET agency_name = mo.agency_name
+            FROM manual_agency_override mo
+            WHERE t.party_name = mo.party_name
+            AND NOT EXISTS (
+                SELECT 1 FROM tally_party_master p
+                WHERE UPPER(TRIM(p.party_name)) = UPPER(TRIM(t.party_name))
+                  AND NULLIF(TRIM(p.agency_name), '') IS NOT NULL
+                  AND LOWER(TRIM(p.agency_name)) NOT IN ('nan','none','null')
+            )
+            AND t.agency_name IS DISTINCT FROM mo.agency_name
+        """)
+        if _cu.rowcount > 0:
+            _logger.info(f"Post-sync: manual agency overrides applied={_cu.rowcount}")
+
+        # Ensure normalization/agency expansion never overrides the live party master.
+        _cu.execute("""
+            UPDATE tickets t SET agency_name = p.agency_name
+            FROM tally_party_master p
+            WHERE UPPER(TRIM(p.party_name)) = UPPER(TRIM(t.party_name))
+              AND NULLIF(TRIM(p.agency_name), '') IS NOT NULL
+              AND LOWER(TRIM(p.agency_name)) NOT IN ('nan','none','null')
+              AND t.agency_name IS DISTINCT FROM p.agency_name
+        """)
+        _logger.info(f"Post-sync: final master agency corrections={_cu.rowcount}")
+
+        # Follow-up lifecycle is handled by apply_ticket_due_cycle().
+        # Do NOT mass archive/unarchive here: old follow-up history must remain
+        # untouched unless a ticket actually starts a new due cycle.
+
+        _c.commit()
+        _cu.close()
+        _logger.info("Post-sync updates complete")
+
+    except Exception as _e:
+        _logger.warning(f"Post-sync update error: {_e}")
+        import traceback as _tb
+        _logger.warning(_tb.format_exc())
+        if _c:
+            try: _c.rollback()
+            except: pass
+    finally:
+        if _c:
+            try: _rc(_c)
+            except: pass
+
+
+                                      THEN t.credit_days::int
+                                      ELSE %s
+                                    END || ' days')::interval
                               ) < CURRENT_DATE
                     ),0)
                     - COALESCE((
