@@ -83,17 +83,18 @@ def tickets():
                    sm.agent_name, sm.agency_name, sm.seller_name,
                    sm.party_state, sm.party_place, sm.party_mobile,
                    sma.party_mobile AS agency_mobile,
-                   (TO_DATE(b.invoice_date,'DD-Mon-YY') + ((CASE WHEN TRIM(COALESCE(t.credit_days,'')) ~ '^[1-9][0-9]*
+                   (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, 30) * INTERVAL '1 day'))::date AS due_date
             FROM billwise b
             LEFT JOIN salesperson_mapping sm ON sm.party_name = b.party_name
             LEFT JOIN salesperson_mapping sma ON UPPER(sma.party_name)=UPPER(sm.agency_name)
             LEFT JOIN tickets t ON t.party_name = b.party_name
             WHERE b.pending_amount > 0
             AND b.invoice_date ~ '^[0-9]{2}-[A-Za-z]{3}-[0-9]{2}$'
-            AND (TO_DATE(b.invoice_date,'DD-Mon-YY') + ((CASE WHEN TRIM(COALESCE(t.credit_days,'')) ~ '^[1-9][0-9]*
+            AND (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, 30) * INTERVAL '1 day'))::date
+                BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
             ORDER BY due_date ASC
         """)
-        return _special_list(due_bills, "📅 Bills due in next 7 days (individual credit period)", "bg-green-100 text-green-700")
+        return _special_list(due_bills, "📅 Bills due in next 7 days (party credit period)", "bg-green-100 text-green-700")
 
     if due_param == "1":
         due_bills = query_df("""
@@ -111,7 +112,8 @@ def tickets():
             LEFT JOIN tickets t ON t.party_name = b.party_name
             WHERE b.pending_amount > 0
             AND b.invoice_no NOT ILIKE '%%on account%%'
-             AND b.invoice_date ~ '^[0-9]{2}-[A-Za-z]{3}-[0-9]{2}
+             AND b.invoice_date LIKE '__-___-__'
+             AND (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, 30) * INTERVAL '1 day')) < CURRENT_DATE
             ORDER BY b.overdue_days DESC
         """)
         # Apply filters on due list
@@ -250,10 +252,12 @@ def tickets():
             _bc = _qdf("""
                 SELECT b.party_name, COUNT(*) AS bill_count
                 FROM billwise b
-                JOIN tickets t ON t.party_name = b.party_name
+                JOIN tickets t ON t.party_name=b.party_name
                 WHERE b.pending_amount > 0
                 AND b.invoice_no NOT ILIKE '%on account%'
-                AND b.invoice_date ~ '^[0-9]{2}-[A-Za-z]{3}-[0-9]{2}
+                AND b.invoice_date LIKE '__-___-__'
+                AND (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, 30) * INTERVAL '1 day')) < CURRENT_DATE
+                GROUP BY b.party_name
             """)
             if not _bc.empty:
                 _bc_map = dict(zip(_bc["party_name"], _bc["bill_count"].astype(int)))
@@ -358,9 +362,15 @@ def tickets2():
         ) p ON p.party_name = t.party_name
         LEFT JOIN LATERAL (
             SELECT COUNT(*) AS due_count,
-                   MAX(CURRENT_DATE - (
-                       TO_DATE(b.invoice_date,'DD-Mon-YY')
-                       + ((CASE WHEN TRIM(COALESCE(t.credit_days,'')) ~ '^[1-9][0-9]*
+                   MAX(CURRENT_DATE - (TO_DATE(b.invoice_date,'DD-Mon-YY') +
+                       (COALESCE(NULLIF(t.credit_days,'')::int, 30) * INTERVAL '1 day'))::date) AS max_overdue
+            FROM billwise b
+            WHERE b.party_name = t.party_name
+              AND b.pending_amount > 0
+              AND b.invoice_no NOT ILIKE '%%on account%%'
+              AND b.invoice_date LIKE '__-___-__'
+              AND (TO_DATE(b.invoice_date,'DD-Mon-YY') + (COALESCE(NULLIF(t.credit_days,'')::int, 30) * INTERVAL '1 day')) < CURRENT_DATE
+        ) db2 ON TRUE
         LEFT JOIN (
             SELECT party_name, COUNT(*) AS fu_count
             FROM followups GROUP BY party_name
