@@ -88,7 +88,7 @@ def ledger():
 
     if selected:
         bills = query_df("""
-            SELECT * FROM billwise WHERE party_name=%s
+            SELECT * FROM billwise WHERE UPPER(TRIM(party_name)) = UPPER(TRIM(%s))
             ORDER BY CASE WHEN invoice_date ~ '^[0-9]{2}-[A-Za-z]{3}-[0-9]{2}$'
                           THEN TO_DATE(invoice_date,'DD-Mon-YY') ELSE NULL END ASC NULLS LAST
         """, (selected,))
