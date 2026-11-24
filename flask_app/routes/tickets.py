@@ -353,9 +353,19 @@ def tickets2():
         LEFT JOIN tally_party_master tpm
             ON regexp_replace(UPPER(tpm.party_name),'\s+',' ','g')
              = regexp_replace(UPPER(t.party_name),'\s+',' ','g')
-        LEFT JOIN salesperson_mapping sm_credit
-            ON REGEXP_REPLACE(UPPER(TRIM(sm_credit.party_name)), '[[:space:]]+', ' ', 'g')
-             = REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g')
+        -- Mapping can contain old and current ledger names differing only by spaces.
+        -- LATERAL + LIMIT 1 prevents a single ticket from being duplicated.
+        LEFT JOIN LATERAL (
+            SELECT sm.credit_period_days
+            FROM salesperson_mapping sm
+            WHERE REGEXP_REPLACE(UPPER(TRIM(sm.party_name)), '[[:space:]]+', ' ', 'g')
+                = REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g')
+            ORDER BY
+                CASE WHEN sm.party_name = t.party_name THEN 0 ELSE 1 END,
+                CASE WHEN sm.credit_period_days > 0 THEN 0 ELSE 1 END,
+                sm.party_name
+            LIMIT 1
+        ) sm_credit ON TRUE
         LEFT JOIN LATERAL (
             SELECT mobile FROM tally_agency_master
             WHERE UPPER(REGEXP_REPLACE(TRIM(agency_name), '\s+', ' ', 'g')) = UPPER(REGEXP_REPLACE(TRIM(COALESCE(NULLIF(tpm.agency_name,''),NULLIF(t.agency_name,''))), '\s+', ' ', 'g'))
