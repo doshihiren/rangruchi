@@ -339,7 +339,7 @@ def tickets2():
 
     MAIN_SQL = r"""
         SELECT
-            t.party_name, t.ticket_number,
+            t.id AS ticket_id, t.party_name, t.ticket_number,
             COALESCE(NULLIF(t.credit_days,'')::int, sm_credit.credit_period_days, 30) AS credit_days,
             t.net_due,
             t.assigned_to, t.party_mobile, t.assigned_on,
@@ -350,9 +350,19 @@ def tickets2():
             COALESCE(db2.max_overdue, 0) AS max_overdue,
             COALESCE(fc.fu_count, 0) AS fu_count
         FROM tickets t
-        LEFT JOIN tally_party_master tpm
-            ON regexp_replace(UPPER(tpm.party_name),'\s+',' ','g')
-             = regexp_replace(UPPER(t.party_name),'\s+',' ','g')
+        -- Tally master may also contain multiple whitespace variants.
+        -- Choose at most one matching master row per ticket.
+        LEFT JOIN LATERAL (
+            SELECT tm.agency_name
+            FROM tally_party_master tm
+            WHERE REGEXP_REPLACE(UPPER(TRIM(tm.party_name)), '[[:space:]]+', ' ', 'g')
+                = REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g')
+            ORDER BY
+                CASE WHEN tm.party_name = t.party_name THEN 0 ELSE 1 END,
+                CASE WHEN NULLIF(TRIM(tm.agency_name),'') IS NOT NULL THEN 0 ELSE 1 END,
+                tm.party_name
+            LIMIT 1
+        ) tpm ON TRUE
         -- Mapping can contain old and current ledger names differing only by spaces.
         -- LATERAL + LIMIT 1 prevents a single ticket from being duplicated.
         LEFT JOIN LATERAL (
@@ -404,7 +414,17 @@ def tickets2():
         cur2.execute(MAIN_SQL + " AND LOWER(TRIM(t.assigned_to))=LOWER(TRIM(%s)) ORDER BY t.net_due DESC", (un,))
 
     cols = [d[0] for d in cur2.description]
-    rows_data = [dict(zip(cols, r)) for r in cur2.fetchall()]
+    # A ticket must appear once even if upstream master data has duplicate
+    # normalized keys. This protects the display without deleting history.
+    raw_rows = [dict(zip(cols, r)) for r in cur2.fetchall()]
+    seen_ticket_ids = set()
+    rows_data = []
+    for ticket_row in raw_rows:
+        ticket_id = ticket_row.get("ticket_id")
+        if ticket_id in seen_ticket_ids:
+            continue
+        seen_ticket_ids.add(ticket_id)
+        rows_data.append(ticket_row)
 
     # User summary cards - Owner sees all, others see only own
     if role.strip().lower() == "owner":
