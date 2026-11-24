@@ -93,14 +93,30 @@ def ledger():
                           THEN TO_DATE(invoice_date,'DD-Mon-YY') ELSE NULL END ASC NULLS LAST
         """, (selected,))
         outstanding = query_df("SELECT balance FROM outstanding WHERE party_name=%s", (selected,))
-        mapping = query_df("SELECT * FROM salesperson_mapping WHERE party_name=%s", (selected,))
-        assigned_row = query_df("SELECT assigned_to, assigned_on FROM tickets WHERE party_name=%s LIMIT 1", (selected,))
-        assigned_to  = str(assigned_row.iloc[0]["assigned_to"] or "") if not assigned_row.empty else ""
-        assigned_on  = str(assigned_row.iloc[0]["assigned_on"] or "") if not assigned_row.empty else ""
-        assigned_row = query_df("SELECT assigned_to, assigned_on FROM tickets WHERE party_name=%s LIMIT 1", (selected,))
-        assigned_to  = str(assigned_row.iloc[0]["assigned_to"] or "") if not assigned_row.empty else ""
-        assigned_on  = str(assigned_row.iloc[0]["assigned_on"] or "") if not assigned_row.empty else ""
-        fu = query_df("SELECT * FROM followups WHERE party_name=%s ORDER BY created_at DESC", (selected,))
+        mapping = query_df("""
+            SELECT * FROM salesperson_mapping
+            WHERE REGEXP_REPLACE(UPPER(TRIM(party_name)), '[[:space:]]+', ' ', 'g') = REGEXP_REPLACE(UPPER(TRIM(%s)), '[[:space:]]+', ' ', 'g')
+            ORDER BY CASE WHEN party_name = %s THEN 0 ELSE 1 END,
+                     CASE WHEN NULLIF(TRIM(agency_name),'') IS NOT NULL THEN 0 ELSE 1 END,
+                     party_name
+            LIMIT 1
+        """, (selected, selected))
+        # Ticket names can differ from billwise by repeated interior spaces.
+        # Read the same assignment used by /tickets, without changing it.
+        assigned_row = query_df("""
+            SELECT assigned_to, assigned_on
+            FROM tickets
+            WHERE REGEXP_REPLACE(UPPER(TRIM(party_name)), '[[:space:]]+', ' ', 'g') = REGEXP_REPLACE(UPPER(TRIM(%s)), '[[:space:]]+', ' ', 'g')
+            ORDER BY CASE WHEN party_name = %s THEN 0 ELSE 1 END, id
+            LIMIT 1
+        """, (selected, selected))
+        assigned_to = str(assigned_row.iloc[0]["assigned_to"] or "") if not assigned_row.empty else ""
+        assigned_on = str(assigned_row.iloc[0]["assigned_on"] or "") if not assigned_row.empty else ""
+        fu = query_df("""
+            SELECT * FROM followups
+            WHERE REGEXP_REPLACE(UPPER(TRIM(party_name)), '[[:space:]]+', ' ', 'g') = REGEXP_REPLACE(UPPER(TRIM(%s)), '[[:space:]]+', ' ', 'g')
+            ORDER BY created_at DESC
+        """, (selected,))
 
         # PDC: match on normalized party name so spacing/case diffs still show in ledger
         pdc = query_df("""
@@ -115,16 +131,20 @@ def ledger():
         # Pull mobile, agency, POS from tally_party_master
         # Normalize multiple spaces so "MARS CLOTHING  BENGALURU" matches "MARS CLOTHING BENGALURU"
         _sel_norm = " ".join(selected.split())
-        tpm = query_df(
-            "SELECT * FROM tally_party_master WHERE"
-            " regexp_replace(party_name, '\\s+', ' ', 'g') = %s",
-            (_sel_norm,))
+        tpm = query_df("""
+            SELECT * FROM tally_party_master
+            WHERE REGEXP_REPLACE(UPPER(TRIM(party_name)), '[[:space:]]+', ' ', 'g') = REGEXP_REPLACE(UPPER(TRIM(%s)), '[[:space:]]+', ' ', 'g')
+            ORDER BY CASE WHEN party_name = %s THEN 0 ELSE 1 END, party_name
+            LIMIT 1
+        """, (selected, selected))
         tm  = tpm.iloc[0].to_dict() if not tpm.empty else {}
 
         # Ticket row — same source tickets page uses for agency_full / agency_phone
         ticket_row = query_df(
-            "SELECT agency_name, agency_mobile, credit_days FROM tickets WHERE party_name=%s LIMIT 1",
-            (selected,),
+            """SELECT agency_name, agency_mobile, credit_days FROM tickets
+               WHERE REGEXP_REPLACE(UPPER(TRIM(party_name)), '[[:space:]]+', ' ', 'g') = REGEXP_REPLACE(UPPER(TRIM(%s)), '[[:space:]]+', ' ', 'g')
+               ORDER BY CASE WHEN party_name = %s THEN 0 ELSE 1 END, id LIMIT 1""",
+            (selected, selected),
         )
         tix = ticket_row.iloc[0].to_dict() if not ticket_row.empty else {}
 
