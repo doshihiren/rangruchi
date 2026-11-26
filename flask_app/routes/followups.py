@@ -23,7 +23,7 @@ def get_fu_filter():
     """Filter followups by ticket assigned_to = current user (everyone incl Owner)."""
     un = session.get("username","")
     return (
-        "WHERE EXISTS (SELECT 1 FROM tickets t2 WHERE t2.party_name=f.party_name AND t2.assigned_to=%s)",
+        "WHERE EXISTS (SELECT 1 FROM tickets t2 WHERE REGEXP_REPLACE(UPPER(TRIM(t2.party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(f.party_name)), '[[:space:]]+', ' ', 'g') AND t2.assigned_to=%s)",
         (un,)
     )
 
@@ -50,18 +50,18 @@ BASE_SQL = r"""SELECT f.id, f.ticket_id, f.party_name, f.bill_no, f.status,
     t.assigned_to AS ticket_assigned_to,
     t.net_due
     FROM followups f
-    LEFT JOIN tickets t ON t.party_name = f.party_name
+    LEFT JOIN LATERAL (SELECT * FROM tickets t0 WHERE REGEXP_REPLACE(UPPER(TRIM(t0.party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(f.party_name)), '[[:space:]]+', ' ', 'g') ORDER BY CASE WHEN t0.party_name=f.party_name THEN 0 ELSE 1 END, t0.id LIMIT 1) t ON TRUE
     LEFT JOIN tally_party_master tpm
-        ON tpm.party_name_norm = regexp_replace(UPPER(f.party_name),'\s+',' ','g')
+        ON tpm.party_name_norm = REGEXP_REPLACE(UPPER(TRIM(f.party_name)), '[[:space:]]+', ' ', 'g')
     WHERE (f.archived IS NULL OR f.archived = FALSE)
     AND COALESCE(t.net_due, 0) > 0"""
 
-LATEST = "AND f.id = (SELECT MAX(f2.id) FROM followups f2 WHERE f2.party_name=f.party_name)"
+LATEST = "AND f.id = (SELECT MAX(f2.id) FROM followups f2 WHERE REGEXP_REPLACE(UPPER(TRIM(f2.party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(f.party_name)), '[[:space:]]+', ' ', 'g'))"
 
 def build_where(fh, extra=""):
     """Build WHERE clause combining base filter with extra conditions."""
     if fh:
-        return f"AND EXISTS (SELECT 1 FROM tickets t2 WHERE t2.party_name=f.party_name AND t2.assigned_to=%s){extra}"
+        return f"AND EXISTS (SELECT 1 FROM tickets t2 WHERE REGEXP_REPLACE(UPPER(TRIM(t2.party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(f.party_name)), '[[:space:]]+', ' ', 'g') AND t2.assigned_to=%s){extra}"
     return extra
 
 def run_query(sql, params):
@@ -106,7 +106,7 @@ def ensure_assignment_reminders(party_name=None, username=None):
           AND (%s IS NULL OR UPPER(TRIM(t.assigned_to))=UPPER(TRIM(%s)))
           AND NOT EXISTS (
               SELECT 1 FROM followups f
-              WHERE f.party_name=t.party_name
+              WHERE REGEXP_REPLACE(UPPER(TRIM(f.party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g')
                 AND (f.archived IS NULL OR f.archived=FALSE)
           )
     """, (party_name, party_name, username, username))
@@ -129,7 +129,7 @@ def followups():
     period  = request.args.get("period","").strip()
 
     # Build per-tab WHERE clauses (all append to BASE_SQL which already has WHERE)
-    user_cond = "AND EXISTS (SELECT 1 FROM tickets t2 WHERE t2.party_name=f.party_name AND t2.assigned_to=%s)"
+    user_cond = "AND EXISTS (SELECT 1 FROM tickets t2 WHERE REGEXP_REPLACE(UPPER(TRIM(t2.party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(f.party_name)), '[[:space:]]+', ' ', 'g') AND t2.assigned_to=%s)"
     status_ex = "AND f.status NOT IN ('Paid','Closed','Dispute')"
 
     w_today    = f"{user_cond} {status_ex} AND f.next_followup_date=CURRENT_DATE {LATEST}"
@@ -150,14 +150,14 @@ def followups():
                        t.party_mobile, t.agency_name, t.party_state
                 FROM tickets t WHERE t.net_due > 0
                 AND t.assigned_to IS NOT NULL AND t.assigned_to != ''
-                AND NOT EXISTS (SELECT 1 FROM followups f WHERE f.party_name=t.party_name AND (f.archived IS NULL OR f.archived=FALSE))
+                AND NOT EXISTS (SELECT 1 FROM followups f WHERE REGEXP_REPLACE(UPPER(TRIM(f.party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g') AND (f.archived IS NULL OR f.archived=FALSE))
                 ORDER BY t.net_due DESC""")
         else:
             nc_df = query_df("""
                 SELECT t.party_name, t.ticket_number, t.net_due, t.assigned_to,
                        t.party_mobile, t.agency_name, t.party_state
                 FROM tickets t WHERE t.net_due > 0 AND t.assigned_to=%s
-                AND NOT EXISTS (SELECT 1 FROM followups f WHERE f.party_name=t.party_name AND (f.archived IS NULL OR f.archived=FALSE))
+                AND NOT EXISTS (SELECT 1 FROM followups f WHERE REGEXP_REPLACE(UPPER(TRIM(f.party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g') AND (f.archived IS NULL OR f.archived=FALSE))
                 ORDER BY t.net_due DESC""", (un,))
         no_call_list = nc_df.to_dict("records") if not nc_df.empty else []
     except Exception as ex:
@@ -268,14 +268,22 @@ def add_followup():
 
     ticket_id = f.get("ticket_id") or None
     if not ticket_id:
-        t = fetchone("SELECT id FROM tickets WHERE party_name=%s LIMIT 1", (party,))
+        t = fetchone("SELECT id FROM tickets WHERE REGEXP_REPLACE(UPPER(TRIM(party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(%s)), '[[:space:]]+', ' ', 'g') ORDER BY CASE WHEN party_name=%s THEN 0 ELSE 1 END, id LIMIT 1", (party,party))
         if t: ticket_id = t["id"]
+    # Keep the canonical ticket party key on newly saved follow-ups.
+    # Historic rows with duplicate spaces remain readable via normalized joins.
+    canonical = fetchone(
+        "SELECT party_name FROM tickets WHERE REGEXP_REPLACE(UPPER(TRIM(party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(%s)), '[[:space:]]+', ' ', 'g') ORDER BY CASE WHEN party_name=%s THEN 0 ELSE 1 END, id LIMIT 1",
+        (party, party)
+    )
+    if canonical:
+        party = canonical["party_name"]
     try:
         ticket_id = int(ticket_id) if ticket_id else None
     except: ticket_id = None
 
     # assigned_to = ticket's assigned user, fallback to current user
-    ta = fetchone("SELECT assigned_to FROM tickets WHERE party_name=%s LIMIT 1", (party,))
+    ta = fetchone("SELECT assigned_to FROM tickets WHERE REGEXP_REPLACE(UPPER(TRIM(party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(%s)), '[[:space:]]+', ' ', 'g') ORDER BY CASE WHEN party_name=%s THEN 0 ELSE 1 END, id LIMIT 1", (party,party))
     fu_assigned_to = (ta["assigned_to"] if ta and ta.get("assigned_to") else un)
 
     today_str = str(date.today())
