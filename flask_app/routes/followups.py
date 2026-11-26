@@ -140,43 +140,45 @@ def followups():
     if aging in ("120 ","120"): aging = "120+"
     period  = request.args.get("period","").strip()
 
-    # Build per-tab WHERE clauses (all append to BASE_SQL which already has WHERE)
-    user_cond = "AND EXISTS (SELECT 1 FROM tickets t2 WHERE REGEXP_REPLACE(UPPER(TRIM(t2.party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(f.party_name)), '[[:space:]]+', ' ', 'g') AND t2.assigned_to=%s)"
-    status_ex = "AND f.status NOT IN ('Paid','Closed','Dispute')"
+    # Today and Overdue are the only tabs rendered in followups.html.
+    # Resolve the latest follow-up once per normalized party, then load only
+    # actionable rows. Do not execute full queries for unused tabs on every GET.
+    latest_ids_sql = """
+        SELECT DISTINCT ON (
+            REGEXP_REPLACE(UPPER(TRIM(party_name)), '[[:space:]]+', ' ', 'g')
+        ) id
+        FROM followups
+        ORDER BY
+            REGEXP_REPLACE(UPPER(TRIM(party_name)), '[[:space:]]+', ' ', 'g'),
+            id DESC
+    """
+    user_cond = """
+        AND EXISTS (
+            SELECT 1 FROM tickets t2
+            WHERE REGEXP_REPLACE(UPPER(TRIM(t2.party_name)), '[[:space:]]+', ' ', 'g')
+                = REGEXP_REPLACE(UPPER(TRIM(f.party_name)), '[[:space:]]+', ' ', 'g')
+              AND UPPER(TRIM(t2.assigned_to)) = UPPER(TRIM(%s))
+        )
+    """
+    # Filtering latest IDs before performing the expensive ticket/master joins
+    # prevents history from multiplying the per-request query work.
+    sql = (BASE_SQL + user_cond + """
+        AND f.id IN (""" + latest_ids_sql + """)
+        AND f.status NOT IN ('Paid','Closed','Dispute')
+        AND f.next_followup_date <= CURRENT_DATE
+        ORDER BY f.next_followup_date ASC, f.priority DESC
+    """)
+    due_df = run_query(sql, (un,))
+    due_rows = due_df.to_dict("records") if not due_df.empty else []
+    today_d = date.today()
+    today_fu = [r for r in due_rows if r.get("next_followup_date") == today_d]
+    overdue_fu = [r for r in due_rows if r.get("next_followup_date") is not None
+                  and r.get("next_followup_date") < today_d]
+    upcoming_fu = []
+    all_fu = []
+    no_call_list = []
 
-    w_today    = f"{user_cond} {status_ex} AND f.next_followup_date=CURRENT_DATE {LATEST}"
-    w_overdue  = f"{user_cond} {status_ex} AND f.next_followup_date<CURRENT_DATE {LATEST}"
-    w_upcoming = f"{user_cond} {status_ex} AND f.next_followup_date>CURRENT_DATE AND f.next_followup_date<=CURRENT_DATE+7 {LATEST}"
-    w_all      = f"{user_cond}"
-
-    today_df    = run_query(f"{BASE_SQL} {w_today}    ORDER BY f.priority DESC",          fp)
-    overdue_df  = run_query(f"{BASE_SQL} {w_overdue}  ORDER BY f.next_followup_date",     fp)
-    upcoming_df = run_query(f"{BASE_SQL} {w_upcoming} ORDER BY f.next_followup_date",     fp)
-    all_df      = run_query(f"{BASE_SQL} {w_all}      ORDER BY f.next_followup_date DESC", fp)
-
-    # No Call Yet
-    try:
-        if role == "Owner":
-            nc_df = query_df("""
-                SELECT t.party_name, t.ticket_number, t.net_due, t.assigned_to,
-                       t.party_mobile, t.agency_name, t.party_state
-                FROM tickets t WHERE t.net_due > 0
-                AND t.assigned_to IS NOT NULL AND t.assigned_to != ''
-                AND NOT EXISTS (SELECT 1 FROM followups f WHERE REGEXP_REPLACE(UPPER(TRIM(f.party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g') AND (f.archived IS NULL OR f.archived=FALSE))
-                ORDER BY t.net_due DESC""")
-        else:
-            nc_df = query_df("""
-                SELECT t.party_name, t.ticket_number, t.net_due, t.assigned_to,
-                       t.party_mobile, t.agency_name, t.party_state
-                FROM tickets t WHERE t.net_due > 0 AND t.assigned_to=%s
-                AND NOT EXISTS (SELECT 1 FROM followups f WHERE REGEXP_REPLACE(UPPER(TRIM(f.party_name)), '[[:space:]]+', ' ', 'g')=REGEXP_REPLACE(UPPER(TRIM(t.party_name)), '[[:space:]]+', ' ', 'g') AND (f.archived IS NULL OR f.archived=FALSE))
-                ORDER BY t.net_due DESC""", (un,))
-        no_call_list = nc_df.to_dict("records") if not nc_df.empty else []
-    except Exception as ex:
-        print(f"no_call_yet error: {ex}")
-        no_call_list = []
-
-    # Tickets dropdown for add-followup form (only parties still having net due)
+    # Dropdown still needs assigned, currently due tickets, but not their histories.
     if wh:
         tickets = run_query(
             f"SELECT party_name, bill_no, pending_amount, id FROM tickets {wh} AND COALESCE(net_due,0) > 0 ORDER BY party_name",
@@ -187,13 +189,6 @@ def followups():
             "SELECT party_name, bill_no, pending_amount, id FROM tickets WHERE COALESCE(net_due,0) > 0 ORDER BY party_name",
             None
         )
-
-    # Build lightweight lists first. History is needed only for the visible tab,
-    # and will be fetched in a single batched query after screen filters.
-    today_fu    = today_df.to_dict("records")    if not today_df.empty    else []
-    overdue_fu  = overdue_df.to_dict("records")  if not overdue_df.empty  else []
-    upcoming_fu = upcoming_df.to_dict("records") if not upcoming_df.empty else []
-    all_fu      = all_df.to_dict("records")      if not all_df.empty      else []
 
     # Smart search filter
     if search:
