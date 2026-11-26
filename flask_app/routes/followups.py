@@ -68,18 +68,30 @@ def run_query(sql, params):
     return query_df(sql, params if params else None)
 
 def add_history(rows):
-    result = []
+    """Load history for visible parties in one query, not one query per row."""
+    if not rows:
+        return []
+    def key(name):
+        return " ".join(str(name or "").upper().split())
+    keys = sorted({key(r.get("party_name")) for r in rows if r.get("party_name")})
+    histories = {}
+    if keys:
+        h = query_df("""
+            SELECT party_name, last_call_date, next_followup_date,
+                   status, notes, assigned_to, created_by
+            FROM followups
+            WHERE REGEXP_REPLACE(UPPER(TRIM(party_name)), '[[:space:]]+', ' ', 'g') = ANY(%s)
+            ORDER BY created_at ASC, id ASC
+        """, (keys,))
+        if not h.empty:
+            for record in h.to_dict("records"):
+                histories.setdefault(key(record["party_name"]), []).append(record)
     for row in rows:
-        h = query_df(
-            "SELECT last_call_date, next_followup_date, status, notes, assigned_to, created_by "
-            "FROM followups WHERE party_name=%s ORDER BY created_at ASC",
-            (row["party_name"],)
-        )
-        row["history"] = h.to_dict("records") if not h.empty else []
+        row["history"] = histories.get(key(row.get("party_name")), [])
         mob = str(row.get("party_mobile") or "")
         row["mobile_display"] = mob[-10:] if len(mob) >= 10 else ""
-        result.append(row)
-    return result
+    return rows
+
 
 def ensure_assignment_reminders(party_name=None, username=None):
     """Create one actionable reminder when an assigned due ticket has no active followup.
@@ -176,10 +188,12 @@ def followups():
             None
         )
 
-    today_fu    = add_history(today_df.to_dict("records")    if not today_df.empty    else [])
-    overdue_fu  = add_history(overdue_df.to_dict("records")  if not overdue_df.empty  else [])
-    upcoming_fu = add_history(upcoming_df.to_dict("records") if not upcoming_df.empty else [])
-    all_fu      = add_history(all_df.to_dict("records")      if not all_df.empty      else [])
+    # Build lightweight lists first. History is needed only for the visible tab,
+    # and will be fetched in a single batched query after screen filters.
+    today_fu    = today_df.to_dict("records")    if not today_df.empty    else []
+    overdue_fu  = overdue_df.to_dict("records")  if not overdue_df.empty  else []
+    upcoming_fu = upcoming_df.to_dict("records") if not upcoming_df.empty else []
+    all_fu      = all_df.to_dict("records")      if not all_df.empty      else []
 
     # Smart search filter
     if search:
@@ -226,6 +240,13 @@ def followups():
         overdue_fu  = [f for f in overdue_fu  if _in_period(f)]
         upcoming_fu = [f for f in upcoming_fu if _in_period(f)]
         all_fu      = [f for f in all_fu      if _in_period(f)]
+
+    # Only the selected tab is rendered by followups.html.
+    # Avoid querying history for every row in all four result lists.
+    if tab == "today":
+        today_fu = add_history(today_fu)
+    elif tab == "overdue":
+        overdue_fu = add_history(overdue_fu)
 
     return render_template("followups.html",
         today_fu    = today_fu,
